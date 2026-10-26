@@ -4,6 +4,7 @@ import time
 
 from homeassistant.core import HomeAssistant
 from homeassistant.config_entries import ConfigEntry, ConfigEntryState
+from homeassistant.helpers import device_registry as dr
 import pytest
 
 from custom_components.netgear_wax.coordinator import WaxCoordinator
@@ -20,6 +21,8 @@ AP = {"id": "a", "name": "Test", "host": "ap.example.test", "username": "sample"
 @pytest.fixture
 async def coordinator(tmp_path):
     hass = HomeAssistant(str(tmp_path))
+    dr.async_setup(hass)
+    await dr.async_load(hass)
     entry = ConfigEntry(
         domain="netgear_wax",
         title="Test",
@@ -34,6 +37,7 @@ async def coordinator(tmp_path):
         state=ConfigEntryState.SETUP_IN_PROGRESS,
     )
     coordinator = WaxCoordinator(hass, entry)
+    coordinator.device_names_ready = True
 
     async def save(data):
         pass
@@ -157,6 +161,52 @@ async def test_no_ack_for_deferred_save_while_stopping(coordinator):
         assert coordinator.names == {}
     finally:
         coordinator.hass.state = old
+
+
+async def test_display_name_sync_only_changes_owned_selected_device(coordinator, monkeypatch):
+    from unittest.mock import Mock
+    from types import SimpleNamespace
+    other = "02:00:00:00:00:02"
+    registry = Mock()
+    device = SimpleNamespace(id="owned", name="Old name", name_by_user="Manual")
+    registry.async_get_device_by_identifier.return_value = device
+    monkeypatch.setattr(dr, "async_get", lambda hass: registry)
+    coordinator.names = {MAC: "New name", other: "Unregistered"}
+    coordinator.async_sync_device_names()
+    registry.async_get_device_by_identifier.assert_called_once_with(("netgear_wax", MAC), coordinator.entry.entry_id)
+    registry.async_update_device.assert_called_once_with("owned", name="New name")
+    registry.reset_mock()
+    coordinator.async_sync_device_names([other])
+    registry.async_get_device_by_identifier.assert_not_called()
+
+
+async def test_display_name_sync_does_not_create_or_rewrite_unchanged_devices(coordinator, monkeypatch):
+    from unittest.mock import Mock
+    from types import SimpleNamespace
+    registry = Mock()
+    monkeypatch.setattr(dr, "async_get", lambda hass: registry)
+    registry.async_get_device_by_identifier.return_value = None
+    coordinator.async_sync_device_names()
+    registry.async_update_device.assert_not_called()
+    registry.async_get_or_create.assert_not_called()
+    registry.async_get_device_by_identifier.return_value = SimpleNamespace(name=f"Wi-Fi {MAC}")
+    coordinator.async_sync_device_names()
+    registry.async_update_device.assert_not_called()
+
+
+async def test_hostname_push_during_platform_setup_defers_display_change(coordinator, monkeypatch):
+    from unittest.mock import Mock
+    from types import SimpleNamespace
+    registry = Mock()
+    registry.async_get_device_by_identifier.return_value = SimpleNamespace(id="owned", name=f"Wi-Fi {MAC}")
+    monkeypatch.setattr(dr, "async_get", lambda hass: registry)
+    coordinator.device_names_ready = False
+    await coordinator.set_hostname(MAC, "Pushed during setup")
+    registry.async_update_device.assert_not_called()
+    assert coordinator.names[MAC] == "Pushed during setup"
+    coordinator.device_names_ready = True
+    coordinator.async_sync_device_names()
+    registry.async_update_device.assert_called_once_with("owned", name="Pushed during setup")
 
 
 async def test_all_metric_entities_construct_and_rssi_keeps_raw_value(coordinator):

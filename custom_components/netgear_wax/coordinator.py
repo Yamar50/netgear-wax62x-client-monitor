@@ -9,8 +9,9 @@ import logging
 from pathlib import Path
 import time
 
-from homeassistant.core import CoreState
+from homeassistant.core import CoreState, callback
 from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
@@ -34,6 +35,7 @@ class WaxCoordinator(DataUpdateCoordinator):
         self._save_lock = asyncio.Lock()
         self.lease_store = Store(hass, 1, f"{DOMAIN}.{entry.entry_id}.lease")
         self.names = {}
+        self.device_names_ready = False
         self.cooldowns = {}
         self.lease = None
         self.data = {"clients": {}, "aps": {}, "updated_at": None}
@@ -78,11 +80,31 @@ class WaxCoordinator(DataUpdateCoordinator):
             if saved != names:
                 raise HomeAssistantError("HostName storage confirmation failed")
             self.names = names
+        self.async_sync_device_names([mac])
         self.async_update_listeners()
         return {"mac": mac, "hostname": hostname, "stored": True}
 
     def _read_saved_names(self):
         return json.loads(Path(self.store.path).read_text())["data"]["names"]
+
+    @callback
+    def async_sync_device_names(self, macs=None):
+        """Update only our registered clients' default names, never identity."""
+        if not self.device_names_ready:
+            # A push can arrive while platforms are registering entities.
+            # Defer the display change until every new entity has its MAC ID.
+            return
+        registry = dr.async_get(self.hass)
+        selected = set(self.settings.get("selected_clients", []))
+        for mac in selected if macs is None else selected.intersection(macs):
+            device = registry.async_get_device_by_identifier((DOMAIN, mac), self.entry.entry_id)
+            if device is None:
+                continue  # Pre-saved names must not create devices.
+            name = self.names.get(mac) or f"Wi-Fi {mac}"
+            if device.name != name:
+                # name_by_user is separate: HA keeps a manual name preferred,
+                # and removing that override reveals the latest HostName.
+                registry.async_update_device(device.id, name=name)
 
     def select_clients(self, selected):
         """Apply a selection to the existing observation, without advancing its age."""

@@ -51,6 +51,8 @@ async def async_setup_entry(hass, entry):
     await coordinator.initialize()
     hass.data[DOMAIN] = coordinator
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    coordinator.device_names_ready = True
+    coordinator.async_sync_device_names()
     entry.async_on_unload(entry.add_update_listener(async_reload_entry))
 
     async def update_freshness(_now):
@@ -80,12 +82,15 @@ async def async_reload_entry(hass, entry):
             if entry.state is not ConfigEntryState.LOADED:
                 return
             keep_polling = coordinator.async_add_listener(lambda: None)
+            coordinator.device_names_ready = False
             try:
                 if not await hass.config_entries.async_unload_platforms(entry, PLATFORMS):
                     raise ServiceValidationError("Unable to update client entities")
                 coordinator.select_clients(settings.get("selected_clients", []))
                 await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
             finally:
+                coordinator.device_names_ready = True
                 keep_polling()
+            coordinator.async_sync_device_names()
         return
     await hass.config_entries.async_reload(entry.entry_id)
