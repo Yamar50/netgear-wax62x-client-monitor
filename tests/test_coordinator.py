@@ -10,7 +10,7 @@ from custom_components.netgear_wax.coordinator import WaxCoordinator
 from custom_components.netgear_wax.lease import LeaseManager, BusyError
 from custom_components.netgear_wax.api import LogoutError
 from custom_components.netgear_wax.binary_sensor import Connected
-from custom_components.netgear_wax.sensor import ClientMetric
+from custom_components.netgear_wax.sensor import ClientMetric, FIELDS
 from custom_components.netgear_wax.model import normalize_client
 
 MAC = "02:00:00:00:00:01"
@@ -110,6 +110,19 @@ async def test_names_do_not_change_identity_or_get_overwritten(coordinator):
     assert Connected(coordinator, MAC, "connected").unique_id == before
     await coordinator.set_hostname(MAC, "")
     assert MAC not in coordinator.names
+
+
+async def test_all_metric_entities_construct_and_rssi_keeps_raw_value(coordinator):
+    coordinator.data = {
+        "clients": {MAC: {"mac": MAC, "connected": True, "fresh": True, "rssi": 48}},
+        "aps": {},
+        "updated_timestamp": time.time(),
+    }
+    entities = {key: ClientMetric(coordinator, MAC, key) for key in FIELDS}
+    rssi = entities["rssi"]
+    assert rssi.native_value == 48
+    assert rssi.device_class is None
+    assert rssi.native_unit_of_measurement is None
 
 
 async def test_stale_data_unavailable_even_without_poll(coordinator):

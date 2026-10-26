@@ -16,7 +16,7 @@ FIELDS = {
     "channel": (None, None),
     "band": (None, None),
     "mode": (None, None),
-    "rssi": (SensorDeviceClass.SIGNAL_STRENGTH),
+    "rssi": (None, None),
     "tx_rate": (SensorDeviceClass.DATA_RATE, UnitOfDataRate.BITS_PER_SECOND),
     "rx_rate": (SensorDeviceClass.DATA_RATE, UnitOfDataRate.BITS_PER_SECOND),
     "tx_bytes": (SensorDeviceClass.DATA_SIZE, UnitOfInformation.BYTES),
