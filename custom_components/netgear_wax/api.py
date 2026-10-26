@@ -166,13 +166,28 @@ class WaxClient:
         if model not in ("WAX625", "WAX628"):
             raise WaxError("unsupported_model")
         ap = {"id": self.config["id"], "name": system.get("basicSettings", {}).get("apName") or self.config["name"]}
-        await self.request("/connectedClients")
-        await self.socket({"system": {"monitor": {"radioApStatus": {"totalNumberOfStations": ""}, "clientList": ""}}})
-        await self.socket({"system": {"monitor": {"recentCliList": {"5": ""}}}})
+        # Dashboard counts and lists are separate, non-atomic AP reads. Refresh
+        # both in this same owned session when a list is incomplete; never retry
+        # authentication or open another AP session here.
+        for attempt in range(3):
+            if attempt:
+                await asyncio.sleep(1)
+                system, counts = await self.dashboard()
+                monitor = system["monitor"]
+            await self.request("/connectedClients")
+            await self.socket({"system": {"monitor": {"radioApStatus": {"totalNumberOfStations": ""}, "clientList": ""}}})
+            await self.socket({"system": {"monitor": {"recentCliList": {"5": ""}}}})
+            try:
+                # Capture both lists before the slower per-client detail reads.
+                lists = {wlan: await self.client_list(wlan, counts[wlan]) for wlan in ("wlan0", "wlan1")}
+                break
+            except WaxError as err:
+                if str(err) != "incomplete_client_list" or attempt == 2:
+                    raise
         now = time.time()
         rows = []
         for wlan, band in (("wlan0", "2.4GHz"), ("wlan1", "5GHz")):
-            for basic in await self.client_list(wlan, counts[wlan]):
+            for basic in lists[wlan]:
                 mac = mac_address(basic["mac"])
                 # WAX detail selectors are case-sensitive, unlike stored MAC identity.
                 key = mac.upper().replace(":", "-")
@@ -202,8 +217,12 @@ class WaxClient:
             "model": model,
             "firmware": monitor.get("sysVersion"),
             "uptime": monitor.get("DeviceInfo", {}).get("UpTime"),
-            "clients_24ghz": counts["wlan0"],
-            "clients_5ghz": counts["wlan1"],
+            # Consumers validate these counts against the actual captured rows.
+            # AP counters can lag and are retained separately for diagnostics.
+            "clients_24ghz": len(lists["wlan0"]),
+            "clients_5ghz": len(lists["wlan1"]),
+            "reported_clients_24ghz": counts["wlan0"],
+            "reported_clients_5ghz": counts["wlan1"],
             "channel_24ghz": monitor.get("currentChannel", {}).get("wlan0"),
             "channel_5ghz": monitor.get("currentChannel", {}).get("wlan1"),
             "observed_timestamp": now,

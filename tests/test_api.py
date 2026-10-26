@@ -104,3 +104,101 @@ async def test_zero_count_requires_no_list_request(monkeypatch):
 
     monkeypatch.setattr(client, "socket", unexpected)
     assert await client.client_list("wlan0", 0) == []
+
+
+class ClientListsFixture(Simulated):
+    read_clients = WaxClient.read_clients
+
+    def __init__(self, counts, lists):
+        super().__init__()
+        self.counts = counts
+        self.lists = lists
+        self.attempt = -1
+        self.read_order = []
+
+    async def dashboard(self):
+        self.attempt += 1
+        counts = self.counts[min(self.attempt, len(self.counts) - 1)]
+        return {"monitor": {"productId": "WAX625"}}, counts
+
+    async def client_list(self, wlan, expected):
+        return await WaxClient.client_list(self, wlan, expected)
+
+    async def socket(self, payload, referer="/dashboard"):
+        node = payload.get("system", {}).get("monitor", {}).get("optCliList")
+        if node:
+            wlan = next(iter(node))
+            if "3146087" in node[wlan]:
+                self.read_order.append(("list", wlan))
+                rows = self.lists[min(self.attempt, len(self.lists) - 1)][wlan]
+                if isinstance(rows, Exception):
+                    raise rows
+                return {"system": {"monitor": {"optCliList": {wlan: {"3146087": rows}}}}}
+            self.read_order.append(("detail", wlan))
+        return {}
+
+
+def basic(mac=MAC):
+    return {"mac": mac, "status": "Authenticated"}
+
+
+async def test_lists_retry_same_session_refresh_counts_and_precede_details(monkeypatch):
+    async def no_delay(seconds):
+        assert seconds == 1
+    monkeypatch.setattr(asyncio, "sleep", no_delay)
+    client = ClientListsFixture(
+        [{"wlan0": 2, "wlan1": 1}, {"wlan0": 1, "wlan1": 1}],
+        [{"wlan0": [basic()], "wlan1": [basic("02:00:00:00:00:02")]}],
+    )
+    result = await client.collect()
+    assert client.attempt == 1
+    assert client.logout_ok
+    assert sum(login for _, login in client.calls) == 1
+    assert len(result["clients"]) == 2
+    assert client.read_order == [("list", "wlan0"), ("list", "wlan0"), ("list", "wlan1"),
+                                 ("detail", "wlan0"), ("detail", "wlan1")]
+
+
+async def test_export_counts_match_captured_lists_not_lagging_dashboard():
+    client = ClientListsFixture(
+        [{"wlan0": 1, "wlan1": 0}],
+        [{"wlan0": [basic(), basic("02:00:00:00:00:02")], "wlan1": []}],
+    )
+    result = await client.collect()
+    assert result["clients_24ghz"] == len(result["clients"]) == 2
+    assert result["reported_clients_24ghz"] == 1
+    assert result["clients_5ghz"] == 0
+
+
+async def test_incomplete_list_stops_after_three_reads_and_logs_out(monkeypatch):
+    async def no_delay(seconds):
+        pass
+    monkeypatch.setattr(asyncio, "sleep", no_delay)
+    client = ClientListsFixture([{"wlan0": 2, "wlan1": 0}], [{"wlan0": [], "wlan1": []}])
+    with pytest.raises(WaxError, match="incomplete_client_list"):
+        await client.collect()
+    assert client.attempt == 2
+    assert client.logout_ok
+    assert sum(login for _, login in client.calls) == 1
+    assert all(kind == "list" for kind, _ in client.read_order)
+
+
+async def test_retry_can_confirm_genuine_empty_ap(monkeypatch):
+    async def no_delay(seconds):
+        pass
+    monkeypatch.setattr(asyncio, "sleep", no_delay)
+    client = ClientListsFixture([{"wlan0": 1, "wlan1": 0}, {"wlan0": 0, "wlan1": 0}],
+                               [{"wlan0": [], "wlan1": []}])
+    result = await client.collect()
+    assert result["clients"] == []
+    assert result["clients_24ghz"] == 0
+    assert client.attempt == 1
+
+
+async def test_list_login_limit_is_not_retried():
+    client = ClientListsFixture([{"wlan0": 1, "wlan1": 0}],
+                               [{"wlan0": LoginLimitError("login_limit"), "wlan1": []}])
+    with pytest.raises(LoginLimitError):
+        await client.collect()
+    assert client.attempt == 0
+    assert client.logout_ok
