@@ -32,8 +32,9 @@ def radio_payload(table, status):
     clean = {}
     for band in ("wlan0", "wlan1"):
         row = table.get(band, {})
-        if any(type(row.get(key)) not in (str, int) or not str(row[key]).isdigit() for key in FIELDS):
-            raise WaxError("incomplete_radio_settings")
+        for key in FIELDS:
+            if type(row.get(key)) not in (str, int) or not str(row[key]).isdigit():
+                raise WaxError(f"incomplete_radio_settings:{band}:{key}")
         if str(row["radioStatus"]) not in ("0", "1"):
             raise WaxError("invalid_radio_status")
         clean[band] = {key: str(row[key]) for key in FIELDS}

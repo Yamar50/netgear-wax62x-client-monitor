@@ -67,7 +67,9 @@ class RadioMonitorView(HomeAssistantView):
             return self.json({"error": "invalid_request_or_configuration"}, status_code=400)
         except BusyError:
             return self.json({"error": "busy"}, status_code=409)
-        except (WaxError, HomeAssistantError, OSError, TimeoutError):
+        except WaxError as error:
+            return self.json({"error": "radio_operation_unconfirmed", "reason": str(error)}, status_code=503)
+        except (HomeAssistantError, OSError, TimeoutError):
             return self.json({"error": "radio_operation_unconfirmed"}, status_code=503)
         return self.json(result)
 
