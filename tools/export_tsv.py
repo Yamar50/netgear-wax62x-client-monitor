@@ -117,10 +117,13 @@ def convert(snapshot, now=None):
 
 def atomic_write(path, value):
     path = Path(path)
+    # Keep existing viewer access when a scheduled service uses a different UID.
+    # New files remain private by default.
+    mode = path.stat().st_mode & 0o777 if path.exists() else 0o600
     temporary = path.with_name(path.name + f".tmp.{os.getpid()}")
     try:
         with temporary.open("x", encoding="utf-8") as handle:
-            os.chmod(temporary, 0o600)
+            os.chmod(temporary, mode)
             handle.write(value)
         os.replace(temporary, path)
     finally:

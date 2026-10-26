@@ -3,7 +3,7 @@ from pathlib import Path
 import hashlib
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
-from export_tsv import convert, export
+from export_tsv import convert, export, atomic_write
 from ha_client import HAError
 import ast
 import json
@@ -73,3 +73,13 @@ def test_external_helpers_support_python39_syntax():
     for name in ("ha_client.py", "export_tsv.py", "export_snapshot.py", "with_reservation.py"):
         source = Path(__file__).resolve().parents[1] / "tools" / name
         ast.parse(source.read_text(), filename=name, feature_version=(3, 9))
+
+
+def test_atomic_export_preserves_existing_viewer_read_access(tmp_path):
+    target = tmp_path / "view.tsv"
+    atomic_write(target, "first")
+    assert target.stat().st_mode & 0o777 == 0o600
+    target.chmod(0o644)
+    atomic_write(target, "second")
+    assert target.read_text() == "second"
+    assert target.stat().st_mode & 0o777 == 0o644
