@@ -4,7 +4,7 @@ from types import SimpleNamespace
 import time
 from unittest.mock import AsyncMock, Mock
 
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, CoreState, HassJob
 import pytest
 
 from custom_components.netgear_wax.lease import LeaseManager
@@ -132,3 +132,13 @@ async def test_old_results_expire_to_unknown(monitor):
     await monitor.run()
     monitor.state["checked_timestamp"] = time.time() - 1201
     assert all(row["visible"] is None for row in monitor.export()["observations"].values())
+
+
+async def test_interval_callback_dispatch_runs_on_ha_loop(monitor):
+    monitor.hass.set_state(CoreState.running)
+    job = HassJob(monitor.tick)
+    monitor.hass.async_run_hass_job(job, None)
+    await monitor.hass.async_block_till_done()
+    assert monitor.task is not None
+    await monitor.task
+    assert monitor.state["status"] == "all_visible"

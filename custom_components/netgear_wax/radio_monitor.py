@@ -11,7 +11,7 @@ import re
 import struct
 import time
 
-from homeassistant.core import CoreState
+from homeassistant.core import CoreState, callback
 from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.storage import Store
 
@@ -87,6 +87,7 @@ class RadioMonitor:
         await self.save()
         self.unsubscribe = async_track_time_interval(self.hass, self.tick, timedelta(seconds=30))
 
+    @callback
     def tick(self, _now=None):
         if self.state["mode"] == "standby" or self.hass.state is not CoreState.running:
             return
