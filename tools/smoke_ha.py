@@ -210,6 +210,26 @@ async def main():
             request.body = {"operation": "release", "token": ticket["token"]}
             assert (await ReservationView().post(request)).status == 200
             print("runtime_cache_reservation_views", "PASS")
+            from custom_components.netgear_wax.http import ConnectionView
+            from custom_components.netgear_wax.model import iso_time
+            baseline = dict(coordinator.data)
+            for connected in (True, False):
+                request.body = {"mac": "02:00:00:00:00:01", "ap_name": "Test AP",
+                                "connected": connected, "observed_at": iso_time(time.time())}
+                response = await ConnectionView().post(request)
+                assert response.status == 200, response.body
+                assert json.loads(response.body)["handled"] is True
+                await hass.async_block_till_done()
+                assert hass.states.get("binary_sensor.family_presence").state == ("on" if connected else "off")
+            assert coordinator.data == baseline
+            ticket = await coordinator.lease.acquire("push-reload-test")
+            with patch.object(WaxClient, "collect", side_effect=AssertionError("Unexpected AP request")):
+                assert await hass.config_entries.async_reload(entry.entry_id)
+                await hass.async_block_till_done()
+            coordinator = entry.runtime_data
+            assert hass.states.get("binary_sensor.family_presence").state == "off"
+            await coordinator.lease.release("push-reload-test", ticket["token"])
+            print("connection_views_entity_updates_reload_without_AP_login", "PASS")
         finally:
             await hass.async_stop(force=True)
 

@@ -26,7 +26,8 @@ class Connected(ClientEntity, BinarySensorEntity):
     @property
     def extra_state_attributes(self):
         row = self.row
-        return {k: row.get(k) for k in ("mac", "ap_name", "ssid", "connection_checked_at", "observed_at")}
+        return {k: row.get(k) for k in ("mac", "ap_name", "ssid", "connection_checked_at", "observed_at",
+                                      "connection_source", "connection_observed_at")}
 
 
 class Busy(CoordinatorEntity, BinarySensorEntity):

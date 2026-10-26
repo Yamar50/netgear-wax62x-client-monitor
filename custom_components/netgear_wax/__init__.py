@@ -13,7 +13,7 @@ from homeassistant.config_entries import ConfigEntryState
 
 from .const import DOMAIN, PLATFORMS
 from .coordinator import WaxCoordinator
-from .http import ReservationView, SnapshotView
+from .http import ConnectionView, ReservationView, SnapshotView
 
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 
@@ -21,6 +21,7 @@ CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 async def async_setup(hass, config):
     hass.http.register_view(SnapshotView())
     hass.http.register_view(ReservationView())
+    hass.http.register_view(ConnectionView())
 
     async def set_hostname(call: ServiceCall):
         coordinator = hass.data.get(DOMAIN)

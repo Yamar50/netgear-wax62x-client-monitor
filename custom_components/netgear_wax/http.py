@@ -2,9 +2,29 @@
 
 from aiohttp import web
 from homeassistant.components.http import HomeAssistantView
+from homeassistant.exceptions import HomeAssistantError
 
 from .const import DOMAIN
 from .lease import BusyError, LeaseError
+
+
+class ConnectionView(HomeAssistantView):
+    url = f"/api/{DOMAIN}/connection"
+    name = f"api:{DOMAIN}:connection"
+    requires_auth = True
+
+    async def post(self, request):
+        if not request["hass_user"].is_admin:
+            return self.json({"error": "admin_required"}, status_code=403)
+        coordinator = request.app["hass"].data.get(DOMAIN)
+        if coordinator is None:
+            return self.json({"error": "integration_not_loaded"}, status_code=503)
+        try:
+            return self.json(await coordinator.report_connection(await request.json()))
+        except (ValueError, TypeError, OverflowError, web.HTTPBadRequest):
+            return self.json({"error": "invalid_connection_report"}, status_code=400)
+        except HomeAssistantError:
+            return self.json({"error": "report_not_saved"}, status_code=503)
 
 
 class SnapshotView(HomeAssistantView):

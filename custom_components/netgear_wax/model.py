@@ -126,6 +126,14 @@ def reconcile(previous: dict, results: list[dict], selected: list[str], now: flo
         else:
             row["connected"] = False if complete else None
         row["connection_checked_at"] = iso_time(now) if row["connected"] is not None else None
+        # Persist an ordering fence even when restart/staleness later makes the
+        # state unknown. An already superseded PUSH must never become live again.
+        if row["connected"] is True:
+            row["connection_fence_timestamp"] = current["observed_timestamp"]
+        elif row["connected"] is False:
+            row["connection_fence_timestamp"] = min(
+                r.get("collection_started_timestamp", r.get("observed_timestamp", now)) for r in results
+            )
         row["fresh"] = current is not None
         # Keep selected clients indefinitely; unseen unselected clients expire after a day.
         if current or key in selected or now - row.get("observed_timestamp", 0) < 86400:

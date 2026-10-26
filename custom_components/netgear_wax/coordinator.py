@@ -19,6 +19,7 @@ from .api import WaxClient, WaxError, AuthenticationError, LoginLimitError, Logo
 from .const import DOMAIN, DEFAULT_INTERVAL, COOLDOWN_SECONDS, MAX_POLL_SECONDS
 from .lease import LeaseManager, BusyError
 from .model import iso_time, mac_address, reconcile
+from .connection import apply_report, validate_report
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -36,11 +37,15 @@ class WaxCoordinator(DataUpdateCoordinator):
         self.lease_store = Store(hass, 1, f"{DOMAIN}.{entry.entry_id}.lease")
         self.names = {}
         self.device_names_ready = False
+        self.connection_store = Store(hass, 1, f"{DOMAIN}.{entry.entry_id}.connections", atomic_writes=True)
+        self._connection_lock = asyncio.Lock()
+        self.connection_reports = {}
         self.cooldowns = {}
         self.lease = None
         self.data = {"clients": {}, "aps": {}, "updated_at": None}
 
     async def initialize(self):
+        self.connection_reports = await self.connection_store.async_load() or {}
         saved = await self.store.async_load() or {}
         self.names = saved.get("names", {})
         self.cooldowns = saved.get("cooldowns", {})
@@ -53,6 +58,37 @@ class WaxCoordinator(DataUpdateCoordinator):
         self.lease = LeaseManager(self.lease_store.async_save, await self.lease_store.async_load())
         # No initial login when polling is disabled: safe HACS setup/cutover.
         await self.async_config_entry_first_refresh()
+
+    async def report_connection(self, data):
+        event = validate_report(data, self.settings["aps"], time.time())
+        ack = {k: event[k] for k in ("mac", "connected", "observed_at")}
+        async with self._connection_lock:
+            if self.hass.state is CoreState.stopping:
+                raise HomeAssistantError("Home Assistant is stopping; retry later")
+            previous = self.connection_reports.get(event["mac"])
+            if previous and previous["observed_timestamp"] >= event["observed_timestamp"]:
+                return {**ack, "handled": True, "accepted": False, "reason": "duplicate_or_older"}
+            current = self.export()["clients"].get(event["mac"], {})
+            if not event["connected"] and current.get("connected") is True and current.get("ap_id") != event["ap_id"]:
+                return {**ack, "handled": True, "accepted": False, "reason": "different_ap"}
+            reports = {mac: report for mac, report in self.connection_reports.items()
+                       if report["observed_timestamp"] >= time.time() - 86400}
+            if len(reports) >= 8192 and event["mac"] not in reports:
+                raise HomeAssistantError("Connection report capacity reached")
+            reports[event["mac"]] = event
+            await self.connection_store.async_save(reports)
+            try:
+                saved = await self.hass.async_add_executor_job(
+                    lambda: json.loads(Path(self.connection_store.path).read_text())["data"]
+                )
+            except (OSError, ValueError, KeyError) as err:
+                raise HomeAssistantError("Connection report storage confirmation failed") from err
+            if saved != reports:
+                raise HomeAssistantError("Connection report storage confirmation failed")
+            self.connection_reports = reports
+        # Preserve the scheduled poll and raw AP snapshot age.
+        self.async_update_listeners()
+        return {**ack, "handled": True, "accepted": True, "reason": "stored"}
 
     async def save(self):
         async with self._save_lock:
@@ -124,13 +160,20 @@ class WaxCoordinator(DataUpdateCoordinator):
         now = time.time()
         clients = {}
         freshness_limit = max(self.interval * 2, 120)
-        for mac, source in self.data["clients"].items():
+        candidates = dict(self.data["clients"])
+        for mac, report in self.connection_reports.items():
+            if now - report["observed_timestamp"] <= freshness_limit:
+                candidates.setdefault(mac, {"mac": mac, "connected": None, "fresh": False})
+        for mac, source in candidates.items():
             row = dict(source)
+            row["connection_source"] = "poll"
+            row["connection_observed_at"] = row.get("connection_checked_at")
             row["hostname"] = self.names.get(mac) or row.get("reported_hostname")
             row["custom_hostname"] = self.names.get(mac, "")
             if now - self.data.get("updated_timestamp", 0) > freshness_limit:
                 row["connected"] = None
                 row["fresh"] = False
+            row = apply_report(row, self.connection_reports.get(mac), self.data["aps"], now, freshness_limit)
             clients[mac] = row
         return {
             "schema_version": 1,
@@ -172,10 +215,12 @@ class WaxCoordinator(DataUpdateCoordinator):
                     results.append(result)
                     continue
                 client = WaxClient(config)
+                collection_started = time.time()
                 try:
                     # Serial AP sessions; timeout still runs the client's logout finally.
                     async with asyncio.timeout(MAX_POLL_SECONDS):
                         result = await client.collect()
+                        result["collection_started_timestamp"] = collection_started
                 except (AuthenticationError, LoginLimitError, LogoutError) as err:
                     result["error"] = str(err)
                     self.cooldowns[ap_id] = time.time() + COOLDOWN_SECONDS
