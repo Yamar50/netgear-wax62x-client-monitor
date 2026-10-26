@@ -4,5 +4,10 @@ pythonpath = ["."]
 [tool.ruff]
 line-length = 120
 target-version = "py314"
+[tool.ruff.per-file-target-version]
+"tools/ha_client.py" = "py39"
+"tools/with_reservation.py" = "py39"
+"tools/export_snapshot.py" = "py39"
+"tools/export_tsv.py" = "py39"
 [tool.ruff.lint]
 select = ["E4", "E7", "E9", "F"]

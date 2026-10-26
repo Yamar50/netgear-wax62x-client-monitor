@@ -45,7 +45,7 @@ class HAClient:
                 return json.load(response)
         except urllib.error.HTTPError as err:
             raise HAError(err.code) from None
-        except urllib.error.URLError, TimeoutError:
+        except (urllib.error.URLError, TimeoutError):
             raise HAError("unreachable") from None
 
     def reservation(self, operation, **data):

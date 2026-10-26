@@ -90,7 +90,7 @@ def main():
     except HAError as err:
         print(str(err) + "; AP command not started or stopped.", file=sys.stderr)
         result = 75
-    except ValueError, OSError:
+    except (ValueError, OSError):
         print("Reservation command failed; check local configuration.", file=sys.stderr)
         result = 75
     return result

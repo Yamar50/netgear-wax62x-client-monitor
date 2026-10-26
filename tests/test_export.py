@@ -3,7 +3,10 @@ from pathlib import Path
 import hashlib
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
-from export_tsv import convert
+from export_tsv import convert, export
+from ha_client import HAError
+import ast
+import json
 
 
 def snapshot():
@@ -43,3 +46,30 @@ def test_stale_export_never_claims_active():
     assert "Disconnect" in tsv
     assert status["aps"][0]["status"] == "unavailable"
     assert status["generatedAt"] == "2026-01-01T00:00:00+00:00"
+
+
+def test_ha_outage_invalidates_old_active_rows_without_refreshing_observation(tmp_path):
+    class OfflineHA:
+        def request(self, path):
+            raise HAError("unreachable")
+
+    target = tmp_path / "WAX625_ClientDetail.tsv"
+    tsv, status = convert(snapshot(), now=110)
+    target.write_text(tsv)
+    sidecar = Path(str(target) + ".status.json")
+    sidecar.write_text(json.dumps(status))
+    export(OfflineHA(), target)
+    result = target.read_text()
+    metadata = json.loads(sidecar.read_text())
+    assert "Authenticated" not in result and "Disconnect" in result
+    assert "2026-01-01T00:00:00+00:00" in result
+    assert metadata["generatedAt"] == status["generatedAt"]
+    assert metadata["aps"][0]["status"] == "unavailable"
+    assert metadata["tsvSha256"] == hashlib.sha256(result.encode()).hexdigest()
+    assert (tmp_path / "WAX625_OLD_ClientDetails.tsv").read_text() == tsv
+
+
+def test_external_helpers_support_python39_syntax():
+    for name in ("ha_client.py", "export_tsv.py", "export_snapshot.py", "with_reservation.py"):
+        source = Path(__file__).resolve().parents[1] / "tools" / name
+        ast.parse(source.read_text(), filename=name, feature_version=(3, 9))

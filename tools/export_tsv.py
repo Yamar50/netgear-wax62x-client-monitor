@@ -7,9 +7,10 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import sys
 import time
 
-from ha_client import HAClient
+from ha_client import HAClient, HAError
 
 COLUMNS = [
     "MAC Address",
@@ -126,6 +127,60 @@ def atomic_write(path, value):
         temporary.unlink(missing_ok=True)
 
 
+def invalidate(tsv, previous_status):
+    """Keep historical rows/times, but never display them as current after HA failure."""
+    lines = tsv.splitlines()
+    header = lines[0].split("\t")
+    status_index = header.index("Status")
+    ap_index = header.index("AP Name")
+    state_index = header.index("State") if "State" in header else None
+    counts = Counter()
+    output = [lines[0]]
+    for line in lines[1:]:
+        if not line:
+            continue
+        row = line.split("\t")
+        if len(row) != len(header):
+            raise ValueError("Invalid existing TSV")
+        row[status_index] = "Disconnect"
+        if state_index is not None:
+            row[state_index] = "Disconnect"
+        counts[row[ap_index]] += 1
+        output.append("\t".join(row))
+    for ap in previous_status.get("aps", []):
+        counts.setdefault(ap["name"], 0)
+    result = "\n".join(output) + "\n"
+    status = {
+        "version": 1,
+        "generatedAt": previous_status["generatedAt"],
+        "source": "home_assistant",
+        "stale": True,
+        "source_error": "ha_snapshot_unavailable",
+        "tsvSha256": hashlib.sha256(result.encode()).hexdigest(),
+        "aps": [{"name": name, "status": "unavailable", "rows": count} for name, count in counts.items()],
+    }
+    return result, status
+
+
+def export(client, target):
+    target = Path(target)
+    try:
+        snapshot = client.request("/api/netgear_wax/snapshot")
+        if not snapshot.get("updated_at"):
+            raise HAError("not_yet_collected")
+        tsv, status = convert(snapshot)
+    except (HAError, ValueError, KeyError, TypeError):
+        if not target.exists():
+            raise
+        previous = json.loads(Path(str(target) + ".status.json").read_text())
+        tsv, status = invalidate(target.read_text(), previous)
+        print("HA snapshot unavailable; historical rows marked unconfirmed.", file=sys.stderr)
+    if target.exists():
+        atomic_write(target.parent / "WAX625_OLD_ClientDetails.tsv", target.read_text())
+    atomic_write(target, tsv)
+    atomic_write(str(target) + ".status.json", json.dumps(status, ensure_ascii=False) + "\n")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", required=True)
@@ -138,14 +193,7 @@ def main():
     except FileExistsError:
         raise SystemExit("Another cache export is active; inspect stale lock before removal")
     try:
-        snapshot = HAClient(args.config).request("/api/netgear_wax/snapshot")
-        tsv, status = convert(snapshot)
-        if not snapshot.get("updated_at"):
-            raise SystemExit("HA has not collected yet; existing output retained")
-        if target.exists():
-            atomic_write(target.parent / "WAX625_OLD_ClientDetails.tsv", target.read_text())
-        atomic_write(target, tsv)
-        atomic_write(str(target) + ".status.json", json.dumps(status, ensure_ascii=False) + "\n")
+        export(HAClient(args.config), target)
     finally:
         lock.rmdir()
 
