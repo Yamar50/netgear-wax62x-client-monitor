@@ -80,14 +80,16 @@
       },
       "radio_monitor": {
         "title": "5 GHz radio monitoring",
-        "description": "Scan every 10 minutes. Enter one AP name = 5 GHz BSSID per line. Optional recovery runs inside a successful ordinary client collection, only after continuous missing reception and confirmed zero 5 GHz clients. Failed collections wait for the next poll. Switch to standby before changing configuration.",
+        "description": "Scan every 10 minutes. Enter one AP name = 5 GHz BSSID per line. Optional recovery runs inside a successful ordinary client collection, only after continuous missing reception and confirmed zero 5 GHz clients. Failed collections wait for the next poll. Switch to standby before changing configuration. DFS restoration also runs with connected clients. Example: AP name = 52,56,60,64 | 64 . Stop external channel restoration before enabling it here.",
         "data": {
           "interface": "Wireless interface",
           "ssid": "Target SSID",
           "targets": "AP to BSSID mapping",
           "mode": "Mode",
           "recovery_enabled": "Recover 5 GHz Radio during client collection",
-          "missing_minutes": "Continuous missing signal duration (minutes)"
+          "missing_minutes": "Continuous missing signal duration (minutes)",
+          "dfs_enabled": "Restore channels after DFS during client collection",
+          "dfs_policies": "AP name = allowed channels | restoration rotation"
         }
       }
     },

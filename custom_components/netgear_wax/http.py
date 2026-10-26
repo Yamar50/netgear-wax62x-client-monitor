@@ -65,6 +65,8 @@ class RadioMonitorView(HomeAssistantView):
                 result = await radio.run()
             elif operation == "queue_preflight":
                 result = await radio.queue_preflight()
+            elif operation == "import_dfs_indexes":
+                result = await radio.import_dfs_indexes(data.get("indexes"))
             else:
                 raise ValueError("invalid_operation")
         except (ValueError, TypeError, web.HTTPBadRequest):

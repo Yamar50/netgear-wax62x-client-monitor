@@ -117,4 +117,6 @@ class RFStatus(CoordinatorEntity, SensorEntity):
         return {**{k: state.get(k) for k in ("mode", "running", "checked_at", "interval_seconds", "scan_seconds", "error")},
                 "recovery_enabled": state.get("config", {}).get("recovery_enabled", False),
                 "missing_minutes": state.get("config", {}).get("missing_minutes", 30),
-                "last_recovery": state.get("last_recovery", {})}
+                "last_recovery": state.get("last_recovery", {}),
+                "dfs_enabled": state.get("config", {}).get("dfs_enabled", False),
+                "last_dfs": state.get("last_dfs", {})}

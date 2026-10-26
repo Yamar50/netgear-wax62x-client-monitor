@@ -11,6 +11,36 @@ FIELDS = ("radioStatus", "operateMode", "guardInterval", "txPower", "channel", "
 _LOGGER = logging.getLogger(__name__)
 
 
+def channel_number(value):
+    if type(value) not in (str, int) or not str(value).isdigit() or not 1 <= int(value) <= 196:
+        raise WaxError("unknown_channel")
+    return int(value)
+
+
+def validate_dfs_policies(policies, aps):
+    if not isinstance(policies, dict) or not set(policies) <= {ap["id"] for ap in aps}:
+        raise ValueError("invalid_dfs_policies")
+    result = {}
+    for key, policy in policies.items():
+        if not isinstance(policy, dict):
+            raise ValueError("invalid_dfs_policy")
+        allowed, rotation = policy.get("allowed"), policy.get("rotation")
+        if any(not isinstance(x, list) or not 1 <= len(x) <= 64 for x in (allowed, rotation)):
+            raise ValueError("invalid_dfs_channels")
+        if any(type(x) is not int or not 32 <= x <= 177 for x in allowed + rotation):
+            raise ValueError("invalid_dfs_channels")
+        if not set(rotation) <= set(allowed):
+            raise ValueError("rotation_outside_allowed_channels")
+        result[key] = {"allowed": list(allowed), "rotation": list(rotation)}
+    return result
+
+
+def validate_channel_choices(table, policy):
+    channels = table.get("wlan1", {}).get("channelList")
+    if not isinstance(channels, dict) or any(not channels.get(str(ch)) for ch in policy["rotation"]):
+        raise WaxError("target_channel_not_available")
+
+
 def uptime_seconds(value):
     if not isinstance(value, str):
         raise WaxError("unknown_uptime")
@@ -50,8 +80,11 @@ class SessionRadio:
     def __init__(self, client):
         self.client = client
 
-    async def socket(self, payload):
-        reply = await self.client.socket(payload, "/WirelessBasic")
+    async def socket(self, payload, timeout=None):
+        if timeout is None:
+            reply = await self.client.socket(payload, "/WirelessBasic")
+        else:
+            reply = await self.client.socket(payload, "/WirelessBasic", timeout=timeout)
         if type(reply.get("status")) is not int or reply["status"] != 0:
             raise WaxError("radio_api_status_unconfirmed")
         return reply
@@ -118,3 +151,36 @@ class SessionRadio:
         if str(after["wlan1"]["radioStatus"]) != "1":
             raise WaxError("radio_restore_unconfirmed")
         return "recovered"
+
+    async def restore_channel(self, policy, index, before_write):
+        table = await self.details()
+        validate_channel_choices(table, policy)
+        target = policy["rotation"][index % len(policy["rotation"])]
+        payload = radio_payload(table, str(table["wlan1"]["radioStatus"]))
+        payload["system"]["wlanSettings"]["wlanSettingTable"]["wlan1"]["channel"] = str(target)
+        # Active clients do not prevent DFS restoration (explicit user policy).
+        system, _counts = await self.client.dashboard()
+        monitor = system.get("monitor", {})
+        if monitor.get("productId") not in ("WAX625", "WAX628"):
+            raise WaxError("unsupported_model")
+        if uptime_seconds(monitor.get("DeviceInfo", {}).get("UpTime")) < 900:
+            raise WaxError("boot_grace")
+        if channel_number(monitor.get("currentChannel", {}).get("wlan1")) in policy["allowed"]:
+            return "channel_allowed"
+        await before_write(target, (index + 1) % len(policy["rotation"]))
+        # A channel apply may wait for DFS/CAC. Retain the session and reservation
+        # through a cancelled request, then let collect() perform logout.
+        task = asyncio.create_task(self.socket(payload, timeout=180))
+        try:
+            await asyncio.shield(task)
+        except asyncio.CancelledError as cancelled:
+            try:
+                await task
+            except Exception as err:
+                _LOGGER.warning("DFS apply not confirmed during cancellation: %s", type(err).__name__)
+            raise cancelled
+        after = await self.details()
+        if channel_number(after["wlan1"]["channel"]) != target:
+            raise WaxError("channel_apply_unconfirmed")
+        # This confirms configuration, not over-the-air reception after CAC.
+        return "channel_configured"

@@ -45,7 +45,7 @@ class WaxClient:
         self.logout_ok = False
         self.login_attempted = False
 
-    async def request(self, path, payload=None, referer="/dashboard", login=False):
+    async def request(self, path, payload=None, referer="/dashboard", login=False, timeout=None):
         headers = {
             "User-Agent": "Mozilla/5.0",
             "Accept": "application/json, text/javascript, */*; q=0.01",
@@ -67,6 +67,7 @@ class WaxClient:
                 headers=headers,
                 allow_redirects=False,
                 ssl=None if self.config.get("verify_ssl", True) else False,
+                **({"timeout": aiohttp.ClientTimeout(total=timeout)} if timeout is not None else {}),
             ) as response:
                 if response.status in (301, 302, 303, 307, 308) and payload is None:
                     target = self.base.join(URL(response.headers.get("Location", "/")))
@@ -103,8 +104,10 @@ class WaxClient:
         except (aiohttp.ClientError, TimeoutError) as err:
             raise WaxError("connection_failed") from err
 
-    async def socket(self, payload, referer="/dashboard"):
-        return await self.request("/socketCommunication", payload, referer)
+    async def socket(self, payload, referer="/dashboard", timeout=None):
+        if timeout is None:
+            return await self.request("/socketCommunication", payload, referer)
+        return await self.request("/socketCommunication", payload, referer, timeout=timeout)
 
     async def dashboard(self):
         # Empty leaves are the observed read selectors, not configuration writes.

@@ -13,7 +13,7 @@ from custom_components.netgear_wax.wifi_probe import fingerprint
 
 APS = [{"id": str(i), "name": f"Test{i}"} for i in range(4)]
 CONFIG = {"interface": "wlan0", "ssid": "Synthetic", "targets": {str(i): f"02:00:00:00:00:0{i}" for i in range(4)},
-          "recovery_enabled": False, "missing_minutes": 30}
+          "recovery_enabled": False, "missing_minutes": 30, "dfs_enabled": False, "dfs_policies": {}}
 
 
 def scan(missing=()):

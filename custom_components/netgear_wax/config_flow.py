@@ -86,6 +86,10 @@ class WaxOptionsFlow(config_entries.OptionsFlow):
         current = radio.state.get("config", {})
         aps = self.settings["aps"]
         defaults = "\n".join(f"{ap['name']} = {current.get('targets', {}).get(ap['id'], '')}" for ap in aps)
+        dfs_defaults = "\n".join(
+            f"{ap['name']} = {','.join(map(str, policy['allowed']))} | {','.join(map(str, policy['rotation']))}"
+            for ap in aps if (policy := current.get("dfs_policies", {}).get(ap["id"]))
+        )
         errors = {}
         if user_input is not None:
             try:
@@ -100,9 +104,20 @@ class WaxOptionsFlow(config_entries.OptionsFlow):
                     if name not in names or names[name] in targets:
                         raise ValueError("invalid_input")
                     targets[names[name]] = mac
+                policies = {}
+                for line in user_input.get("dfs_policies", "").splitlines():
+                    if not line.strip():
+                        continue
+                    name, channels = (part.strip() for part in line.split("=", 1))
+                    if name not in names or names[name] in policies:
+                        raise ValueError("invalid_input")
+                    allowed, rotation = channels.split("|", 1)
+                    policies[names[name]] = {"allowed": [int(x.strip()) for x in allowed.split(",")],
+                                             "rotation": [int(x.strip()) for x in rotation.split(",")]}
                 config = {"interface": user_input["interface"], "ssid": user_input["ssid"], "targets": targets,
                           "recovery_enabled": user_input.get("recovery_enabled", False),
-                          "missing_minutes": user_input.get("missing_minutes", 30)}
+                          "missing_minutes": user_input.get("missing_minutes", 30),
+                          "dfs_enabled": user_input.get("dfs_enabled", False), "dfs_policies": policies}
                 if config != current:
                     await radio.configure(config)
                 await radio.set_mode(user_input["mode"])
@@ -120,6 +135,9 @@ class WaxOptionsFlow(config_entries.OptionsFlow):
                 vol.Required("recovery_enabled", default=current.get("recovery_enabled", False)): bool,
                 vol.Required("missing_minutes", default=current.get("missing_minutes", 30)): vol.All(
                     vol.Coerce(int), vol.Range(min=10, max=1440)),
+                vol.Required("dfs_enabled", default=current.get("dfs_enabled", False)): bool,
+                vol.Optional("dfs_policies", default=dfs_defaults): selector.TextSelector(
+                    selector.TextSelectorConfig(multiline=True)),
                 vol.Required("mode", default=radio.state["mode"]): selector.SelectSelector(
                     selector.SelectSelectorConfig(options=["standby", "observe"], translation_key="rf_mode")),
             }), errors=errors,

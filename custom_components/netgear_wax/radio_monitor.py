@@ -20,7 +20,7 @@ from .const import DOMAIN
 from .lease import BusyError
 from .model import mac_address, iso_time
 from .radio_scan import scan_wifi
-from .radio_recovery import SessionRadio, uptime_seconds
+from .radio_recovery import SessionRadio, uptime_seconds, channel_number, validate_dfs_policies, validate_channel_choices
 from .wifi_probe import fingerprint
 
 _LOGGER = logging.getLogger(__name__)
@@ -42,8 +42,13 @@ def validate_config(config, aps):
     enabled, minutes = config.get("recovery_enabled", False), config.get("missing_minutes", 30)
     if type(enabled) is not bool or type(minutes) is not int or not 10 <= minutes <= 1440:
         raise ValueError("invalid_recovery_configuration")
+    dfs_enabled = config.get("dfs_enabled", False)
+    policies = validate_dfs_policies(config.get("dfs_policies", {}), aps)
+    if type(dfs_enabled) is not bool or (dfs_enabled and not policies):
+        raise ValueError("invalid_dfs_configuration")
     return {"interface": interface, "ssid": ssid, "targets": targets,
-            "recovery_enabled": enabled, "missing_minutes": minutes}
+            "recovery_enabled": enabled, "missing_minutes": minutes,
+            "dfs_enabled": dfs_enabled, "dfs_policies": policies}
 
 
 def visibility(config, scan):
@@ -203,6 +208,17 @@ class RadioMonitor:
             await self.save()
         return self.export()
 
+    async def import_dfs_indexes(self, indexes):
+        async with self.lock:
+            policies = self.state["config"].get("dfs_policies", {})
+            if self.state["mode"] != "standby" or not isinstance(indexes, dict) or set(indexes) != set(policies):
+                raise ValueError("stop_monitor_and_supply_all_dfs_indexes")
+            if any(type(v) is not int or not 0 <= v < len(policies[k]["rotation"]) for k, v in indexes.items()):
+                raise ValueError("invalid_dfs_index")
+            self.state["dfs_indexes"] = dict(indexes)
+            await self.save()
+        return self.export()
+
     def recovery_due(self, ap_id, now, cycle):
         config = self.state["config"]
         if self.closing or self.state["mode"] != "observe" or not config.get("recovery_enabled", False):
@@ -229,13 +245,24 @@ class RadioMonitor:
         session = SessionRadio(client)
         if ap_id in self.state.get("preflight_pending", []):
             try:
-                await session.details()
+                table = await session.details()
+                policy = self.state["config"].get("dfs_policies", {}).get(ap_id)
+                if policy:
+                    validate_channel_choices(table, policy)
                 outcome = "settings_validated"
             except WaxError as err:
                 outcome = str(err)
             self.state.setdefault("preflight", {})[ap_id] = {"status": outcome, "checked_at": iso_time(time.time())}
             self.state["preflight_pending"].remove(ap_id)
             await self.save()
+        await self.radio_after_collection(client, result, cycle)
+        # Do not combine OFF/ON and a channel apply for the same AP in one poll.
+        if "radio_recovery" not in result or self.recovery_cycle != cycle:
+            await self.dfs_after_collection(client, result)
+
+    async def radio_after_collection(self, client, result, cycle):
+        ap_id = client.config["id"]
+        session = SessionRadio(client)
         if not self.recovery_due(ap_id, time.time(), cycle):
             return
         # Both a complete captured list and the AP's own counter must say zero.
@@ -266,6 +293,42 @@ class RadioMonitor:
         self.state.setdefault("last_recovery", {})[ap_id] = {"status": outcome, "at": iso_time(time.time())}
         await self.save()
         result["radio_recovery"] = outcome
+        self.coordinator.async_update_listeners()
+
+    async def dfs_after_collection(self, client, result):
+        config = self.state["config"]
+        ap_id = client.config["id"]
+        policy = config.get("dfs_policies", {}).get(ap_id)
+        if self.closing or self.state["mode"] != "observe" or not config.get("dfs_enabled", False) or not policy:
+            return
+
+        async def before_write(target, next_index):
+            if self.closing or self.state["mode"] != "observe":
+                raise WaxError("maintenance_stopping")
+            # Match the legacy next-index-before-apply ordering, including an
+            # ambiguous write. Import/export this index during owner handoff.
+            self.state.setdefault("dfs_indexes", {})[ap_id] = next_index
+            self.state.setdefault("last_dfs", {})[ap_id] = {
+                "status": "started", "target_channel": target, "at": iso_time(time.time())}
+            self.state["missing"].pop(ap_id, None)
+            await self.save()
+
+        try:
+            current = channel_number(result.get("channel_5ghz"))
+            if current in policy["allowed"]:
+                result["dfs_restoration"] = "channel_allowed"
+                return
+            if uptime_seconds(result.get("uptime")) < 900:
+                return
+            index = self.state.get("dfs_indexes", {}).get(ap_id, 0)
+            outcome = await SessionRadio(client).restore_channel(policy, index, before_write)
+        except (WaxError, OSError, ValueError, TimeoutError) as err:
+            outcome = str(err) if isinstance(err, WaxError) else type(err).__name__
+            _LOGGER.warning("DFS restoration deferred for %s: %s", client.config["name"], outcome)
+        previous = self.state.get("last_dfs", {}).get(ap_id, {})
+        self.state.setdefault("last_dfs", {})[ap_id] = {**previous, "status": outcome, "at": iso_time(time.time())}
+        await self.save()
+        result["dfs_restoration"] = outcome
         self.coordinator.async_update_listeners()
 
     async def check(self):
