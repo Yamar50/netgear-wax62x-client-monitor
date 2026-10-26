@@ -1,3 +1,7 @@
+wifi_scan_probe:
+  name: Check local Wi-Fi scan capability
+  description: Administrator-only Linux feasibility test. Requests one passive scan per local wireless interface using existing permissions. Returns hashed identifiers and scan age; never changes links, channels, AP settings or polling. Wait two minutes between runs.
+
 set_hostname:
   fields:
     mac:

@@ -1,6 +1,8 @@
 """NETGEAR WAX client monitor with shared access reservations."""
 
+import asyncio
 from datetime import timedelta
+import time
 
 import voluptuous as vol
 from homeassistant.core import ServiceCall, SupportsResponse
@@ -22,6 +24,25 @@ async def async_setup(hass, config):
     hass.http.register_view(SnapshotView())
     hass.http.register_view(ReservationView())
     hass.http.register_view(ConnectionView())
+
+    probe_lock = asyncio.Lock()
+    last_probe = float("-inf")
+
+    async def wifi_scan_probe(call: ServiceCall):
+        """Explicit administrator-only feasibility test, never scheduled."""
+        nonlocal last_probe
+        if probe_lock.locked() or time.monotonic() - last_probe < 120:
+            raise ServiceValidationError("Wait two minutes between Wi-Fi probes")
+        from .wifi_probe import probe_wifi
+
+        async with probe_lock:
+            last_probe = time.monotonic()
+            return await hass.async_add_executor_job(probe_wifi)
+
+    async_register_admin_service(
+        hass, DOMAIN, "wifi_scan_probe", wifi_scan_probe,
+        schema=vol.Schema({}), supports_response=SupportsResponse.ONLY,
+    )
 
     async def set_hostname(call: ServiceCall):
         coordinator = hass.data.get(DOMAIN)
