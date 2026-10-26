@@ -124,7 +124,7 @@
         "name": "PHY mode"
       },
       "rssi": {
-        "name": "RSSI"
+        "name": "RSSI (AP value)"
       },
       "tx_rate": {
         "name": "Transmit rate"

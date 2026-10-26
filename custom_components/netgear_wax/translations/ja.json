@@ -124,7 +124,7 @@
         "name": "接続方式"
       },
       "rssi": {
-        "name": "RSSI"
+        "name": "RSSI（AP値）"
       },
       "tx_rate": {
         "name": "送信速度"

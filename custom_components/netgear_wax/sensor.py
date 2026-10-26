@@ -3,7 +3,7 @@
 from datetime import datetime
 
 from homeassistant.components.sensor import SensorDeviceClass, SensorEntity
-from homeassistant.const import EntityCategory, UnitOfInformation, UnitOfDataRate, SIGNAL_STRENGTH_DECIBELS_MILLIWATT
+from homeassistant.const import EntityCategory, UnitOfInformation, UnitOfDataRate
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
@@ -16,7 +16,7 @@ FIELDS = {
     "channel": (None, None),
     "band": (None, None),
     "mode": (None, None),
-    "rssi": (SensorDeviceClass.SIGNAL_STRENGTH, SIGNAL_STRENGTH_DECIBELS_MILLIWATT),
+    "rssi": (SensorDeviceClass.SIGNAL_STRENGTH),
     "tx_rate": (SensorDeviceClass.DATA_RATE, UnitOfDataRate.BITS_PER_SECOND),
     "rx_rate": (SensorDeviceClass.DATA_RATE, UnitOfDataRate.BITS_PER_SECOND),
     "tx_bytes": (SensorDeviceClass.DATA_SIZE, UnitOfInformation.BYTES),
