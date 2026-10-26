@@ -53,6 +53,19 @@ def normalize_client(row: dict, ap: dict, band: str, timestamp: float) -> dict:
     sizes = {"": 1, "b": 1, "kb": 1000, "mb": 1000000, "gb": 1000000000}
     pmf = clean(row.get("pmf"))
     return {
+        # Explicitly allowlisted AP values for legacy consumers' own TSV conversion.
+        # Do not retain arbitrary response keys, credentials or session metadata.
+        "legacy_row": {
+            key: row[key]
+            for key in (
+                "mac", "ip", "hname", "dOs", "bssid", "ssid", "chnl", "chWidth",
+                "txR", "rxR", "rssi", "txB", "rxB", "txUcastPkts", "txUcastBytes",
+                "rxUcastPkts", "rxUcastBytes", "txBcastPkts", "txBcastBytes",
+                "txMcastPkts", "txMcastBytes", "txError", "txRetry", "rxError", "rxRetry",
+                "state", "type", "dType", "mode", "status", "idle", "time", "vlanID", "Username", "pmf",
+            )
+            if key in row and (row[key] is None or isinstance(row[key], (str, int, float, bool)))
+        },
         "mac": mac_address(row.get("mac", "")),
         "ap_id": ap["id"],
         "ap_name": ap["name"],

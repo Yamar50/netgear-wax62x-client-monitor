@@ -89,6 +89,9 @@ class WaxCoordinator(DataUpdateCoordinator):
                 for key, ap in self.data["aps"].items()
             },
             "clients": clients,
+            # Per-AP observations before fleet deduplication/history retention.
+            # Consumers must check AP status/freshness before using these rows.
+            "ap_clients": self.data.get("ap_clients", {}),
         }
 
     async def _async_update_data(self):
@@ -140,6 +143,7 @@ class WaxCoordinator(DataUpdateCoordinator):
             self.data = {
                 "clients": reconcile(self.data["clients"], results, self.settings.get("selected_clients", []), now),
                 "aps": {r["id"]: {k: v for k, v in r.items() if k != "clients"} for r in results},
+                "ap_clients": {r["id"]: r.get("clients", []) for r in results if r["status"] == "ok"},
                 "updated_timestamp": now,
                 "updated_at": iso_time(now),
             }

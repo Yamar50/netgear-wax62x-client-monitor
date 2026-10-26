@@ -83,6 +83,9 @@ async def test_poll_success_and_entity_values(coordinator, monkeypatch):
     assert ClientMetric(coordinator, MAC, "tx_bytes").native_value == 0
     assert isinstance(ClientMetric(coordinator, MAC, "observed_at").native_value, datetime)
     assert "sample-secret" not in str(coordinator.export())
+    exported = coordinator.export()
+    assert exported["ap_clients"]["a"][0]["legacy_row"]["txB"] == 0
+    assert exported["ap_clients"]["a"][0]["mac"] == MAC
 
 
 async def test_logout_failure_holds_lease_and_unknown(coordinator, monkeypatch):

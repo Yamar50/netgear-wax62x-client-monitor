@@ -70,3 +70,15 @@ def test_zero_and_missing_measurements_not_conflated():
 def test_incomplete_client_status_does_not_become_disconnected():
     unknown = normalize_client({"mac": MAC}, {"id": "a", "name": "AP"}, "5GHz", 100)
     assert reconcile({}, [result("a", [unknown])], [], 100)[MAC]["connected"] is None
+
+
+def test_legacy_row_is_scalar_allowlist_not_raw_response():
+    value = normalize_client(
+        {'mac': MAC, 'status': 'Authenticated', 'txUcastPkts': 12, 'dOs': 'SyntheticOS',
+         'Username': 'Example', 'password': 'never-export', 'security_token': 'never-export',
+         'extra': {'private': 'never-export'}},
+        {'id': 'a', 'name': 'AP'}, '5GHz', 100,
+    )
+    assert value['legacy_row']['txUcastPkts'] == 12
+    assert value['legacy_row']['dOs'] == 'SyntheticOS'
+    assert 'never-export' not in str(value)
