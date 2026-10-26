@@ -116,7 +116,7 @@ class WaxOptionsFlow(config_entries.OptionsFlow):
                 vol.Required("ssid", default=current.get("ssid", "")): str,
                 vol.Required("targets", default=defaults): selector.TextSelector(selector.TextSelectorConfig(multiline=True)),
                 vol.Required("mode", default=radio.state["mode"]): selector.SelectSelector(
-                    selector.SelectSelectorConfig(options=["standby", "observe", "active"], translation_key="rf_mode")),
+                    selector.SelectSelectorConfig(options=["standby", "observe"], translation_key="rf_mode")),
             }), errors=errors,
         )
 
