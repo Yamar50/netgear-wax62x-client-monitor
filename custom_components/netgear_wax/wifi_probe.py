@@ -38,6 +38,7 @@ class GenericNetlink:
         self.sock.settimeout(3)
         self.sock.bind((0, 0))
         self.seq = 0
+        self.events = []
 
     def close(self):
         self.sock.close()
@@ -60,6 +61,8 @@ class GenericNetlink:
                 data = packet[offset + 16 : offset + size]
                 offset += (size + 3) & ~3
                 if seq != self.seq:
+                    if kind == family and len(data) >= 4:
+                        self.events.append((data[0], attributes(data[4:])))
                     continue
                 if msg_flags & 0x10:
                     raise OSError(errno.EINTR, "interrupted_dump")

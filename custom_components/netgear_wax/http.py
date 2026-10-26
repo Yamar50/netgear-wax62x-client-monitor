@@ -5,6 +5,7 @@ from homeassistant.components.http import HomeAssistantView
 from homeassistant.exceptions import HomeAssistantError
 
 from .const import DOMAIN
+from .api import WaxError
 from .lease import BusyError, LeaseError
 
 
@@ -25,6 +26,50 @@ class ConnectionView(HomeAssistantView):
             return self.json({"error": "invalid_connection_report"}, status_code=400)
         except HomeAssistantError:
             return self.json({"error": "report_not_saved"}, status_code=503)
+
+
+class RadioMonitorView(HomeAssistantView):
+    url = f"/api/{DOMAIN}/radio_monitor"
+    name = f"api:{DOMAIN}:radio_monitor"
+    requires_auth = True
+
+    async def get(self, request):
+        if not request["hass_user"].is_admin:
+            return self.json({"error": "admin_required"}, status_code=403)
+        coordinator = request.app["hass"].data.get(DOMAIN)
+        if coordinator is None or not hasattr(coordinator, "radio"):
+            return self.json({"error": "integration_not_loaded"}, status_code=503)
+        return self.json(coordinator.radio.export())
+
+    async def post(self, request):
+        if not request["hass_user"].is_admin:
+            return self.json({"error": "admin_required"}, status_code=403)
+        coordinator = request.app["hass"].data.get(DOMAIN)
+        if coordinator is None or not hasattr(coordinator, "radio"):
+            return self.json({"error": "integration_not_loaded"}, status_code=503)
+        radio = coordinator.radio
+        try:
+            data = await request.json()
+            if not isinstance(data, dict):
+                raise ValueError("invalid_request")
+            operation = data.get("operation")
+            if operation == "configure":
+                result = await radio.configure(data.get("config", {}))
+            elif operation == "set_mode":
+                result = await radio.set_mode(data.get("mode"), data.get("hold_until", 0))
+            elif operation == "check":
+                result = await radio.run()
+            elif operation == "preflight":
+                result = await radio.preflight()
+            else:
+                raise ValueError("invalid_operation")
+        except (ValueError, TypeError, web.HTTPBadRequest):
+            return self.json({"error": "invalid_request_or_configuration"}, status_code=400)
+        except BusyError:
+            return self.json({"error": "busy"}, status_code=409)
+        except (WaxError, HomeAssistantError, OSError, TimeoutError):
+            return self.json({"error": "radio_operation_unconfirmed"}, status_code=503)
+        return self.json(result)
 
 
 class SnapshotView(HomeAssistantView):

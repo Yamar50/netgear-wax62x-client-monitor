@@ -13,6 +13,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
     async_add_entities(
         [Connected(coordinator, m, "connected") for m in coordinator.settings.get("selected_clients", [])]
         + [Busy(coordinator)]
+        + [RFVisible(coordinator, ap) for ap in coordinator.settings["aps"]]
     )
 
 
@@ -47,3 +48,23 @@ class Busy(CoordinatorEntity, BinarySensorEntity):
     @property
     def extra_state_attributes(self):
         return self.coordinator.lease.status()
+
+
+class RFVisible(CoordinatorEntity, BinarySensorEntity):
+    _attr_has_entity_name = True
+    _attr_translation_key = "rf_visible"
+    _attr_device_class = BinarySensorDeviceClass.CONNECTIVITY
+
+    def __init__(self, coordinator, ap):
+        super().__init__(coordinator)
+        self.ap_id = ap["id"]
+        self._attr_unique_id = f"ap_{self.ap_id}_rf_visible"
+        self._attr_device_info = {"identifiers": {(DOMAIN, self.ap_id)}, "name": ap["name"], "manufacturer": "NETGEAR"}
+
+    @property
+    def is_on(self):
+        return self.coordinator.radio.export().get("observations", {}).get(self.ap_id, {}).get("visible")
+
+    @property
+    def available(self):
+        return self.is_on is not None

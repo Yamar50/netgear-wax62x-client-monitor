@@ -74,7 +74,18 @@
           "collection": "取得設定",
           "add_ap": "APを追加",
           "choose_ap": "編集するAP",
-          "clients": "クライアントを登録"
+          "clients": "クライアントを登録",
+          "radio_monitor": "5GHz電波監視"
+        }
+      },
+      "radio_monitor": {
+        "title": "5GHz電波監視",
+        "description": "10分ごとに周囲の電波を確認します。対象は「AP名 = 5GHzのBSSID」を1行に1台入力してください。設定を変更する前に待機へ切り替えてください。「監視と復旧」はほかの監視を停止してから有効にしてください。全AP未検出時もHA自身のWi-Fiは再起動しません。",
+        "data": {
+          "interface": "無線インターフェース",
+          "ssid": "対象SSID",
+          "targets": "APとBSSIDの対応",
+          "mode": "動作モード"
         }
       }
     },
@@ -84,7 +95,11 @@
       "duplicate_host": "このAPは登録済みです。",
       "last_ap": "最後のAPを削除する場合は統合を削除してください。",
       "invalid_mac": "MACアドレスの形式を確認してください。",
-      "invalid_input": "入力値を確認してください。"
+      "invalid_input": "入力値を確認してください。",
+      "invalid_radio_configuration": "AP名・BSSIDとSSIDを確認してください。変更時は先に待機へ切り替えてください。"
+    },
+    "abort": {
+      "radio_configured": "5GHz監視の設定を保存しました。APの再取得は行いません。"
     }
   },
   "entity": {
@@ -94,6 +109,9 @@
       },
       "collector_busy": {
         "name": "AP使用中"
+      },
+      "rf_visible": {
+        "name": "5GHz電波を受信"
       }
     },
     "text": {
@@ -173,6 +191,31 @@
       },
       "ap_channel_5ghz": {
         "name": "5GHzチャンネル"
+      },
+      "rf_channel": {
+        "name": "実測5GHzチャンネル"
+      },
+      "rf_rssi": {
+        "name": "実測5GHz受信強度"
+      },
+      "rf_status": {
+        "name": "5GHz監視状態",
+        "state": {
+          "standby": "待機",
+          "observe": "監視のみ",
+          "active": "監視と復旧",
+          "starting": "開始待ち",
+          "configuration_required": "設定が必要",
+          "waiting_for_access": "AP使用予約待ち",
+          "check_failed": "確認失敗・復旧保留",
+          "all_visible": "全APの電波を受信",
+          "observing_missing": "未検出あり・監視のみ",
+          "all_missing_hold": "全AP未検出・復旧保留",
+          "missing_wait": "連続未検出を確認中",
+          "clients_active_hold": "接続端末あり・復旧保留",
+          "clients_active": "接続端末あり・復旧中止",
+          "recovered": "復旧操作完了"
+        }
       }
     }
   },
@@ -187,6 +230,15 @@
         "hostname": {
           "name": "HostName"
         }
+      }
+    }
+  },
+  "selector": {
+    "rf_mode": {
+      "options": {
+        "standby": "待機",
+        "observe": "監視のみ",
+        "active": "監視と復旧"
       }
     }
   }

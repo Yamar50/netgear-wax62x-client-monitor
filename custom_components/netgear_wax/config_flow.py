@@ -79,7 +79,46 @@ class WaxOptionsFlow(config_entries.OptionsFlow):
         return deepcopy({**self.config_entry.data, **self.config_entry.options})
 
     async def async_step_init(self, user_input=None):
-        return self.async_show_menu(step_id="init", menu_options=["collection", "add_ap", "choose_ap", "clients"])
+        return self.async_show_menu(step_id="init", menu_options=["collection", "add_ap", "choose_ap", "clients", "radio_monitor"])
+
+    async def async_step_radio_monitor(self, user_input=None):
+        radio = self.config_entry.runtime_data.radio
+        current = radio.state.get("config", {})
+        aps = self.settings["aps"]
+        defaults = "\n".join(f"{ap['name']} = {current.get('targets', {}).get(ap['id'], '')}" for ap in aps)
+        errors = {}
+        if user_input is not None:
+            try:
+                names = {ap["name"]: ap["id"] for ap in aps}
+                if len(names) != len(aps):
+                    raise ValueError("invalid_input")
+                targets = {}
+                for line in user_input["targets"].splitlines():
+                    if not line.strip():
+                        continue
+                    name, mac = (part.strip() for part in line.split("=", 1))
+                    if name not in names or names[name] in targets:
+                        raise ValueError("invalid_input")
+                    targets[names[name]] = mac
+                config = {"interface": user_input["interface"], "ssid": user_input["ssid"], "targets": targets}
+                if config != current:
+                    await radio.configure(config)
+                await radio.set_mode(user_input["mode"])
+            except (ValueError, KeyError):
+                errors["base"] = "invalid_radio_configuration"
+            else:
+                # Stored separately and confirmed; no AP/entity-platform reload.
+                return self.async_abort(reason="radio_configured")
+        return self.async_show_form(
+            step_id="radio_monitor",
+            data_schema=vol.Schema({
+                vol.Required("interface", default=current.get("interface", "wlan0")): str,
+                vol.Required("ssid", default=current.get("ssid", "")): str,
+                vol.Required("targets", default=defaults): selector.TextSelector(selector.TextSelectorConfig(multiline=True)),
+                vol.Required("mode", default=radio.state["mode"]): selector.SelectSelector(
+                    selector.SelectSelectorConfig(options=["standby", "observe", "active"], translation_key="rf_mode")),
+            }), errors=errors,
+        )
 
     async def async_step_collection(self, user_input=None):
         settings = self.settings

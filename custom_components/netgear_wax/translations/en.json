@@ -74,7 +74,18 @@
           "collection": "Collection settings",
           "add_ap": "Add access point",
           "choose_ap": "Choose access point",
-          "clients": "Client devices"
+          "clients": "Client devices",
+          "radio_monitor": "5 GHz radio monitoring"
+        }
+      },
+      "radio_monitor": {
+        "title": "5 GHz radio monitoring",
+        "description": "Check nearby signals every 10 minutes. Enter one AP name = 5 GHz BSSID per line. Use standby before changing targets. Stop the previous watcher before enabling active mode. Never resets the HA Wi-Fi adapter.",
+        "data": {
+          "interface": "Wireless interface",
+          "ssid": "Target SSID",
+          "targets": "AP to BSSID mapping",
+          "mode": "Mode"
         }
       }
     },
@@ -84,7 +95,11 @@
       "duplicate_host": "This AP is already configured.",
       "last_ap": "The last AP cannot be removed here.",
       "invalid_mac": "A MAC address is invalid.",
-      "invalid_input": "Check the entered values."
+      "invalid_input": "Check the entered values.",
+      "invalid_radio_configuration": "Check targets, SSID and interface. Change to standby before editing configuration."
+    },
+    "abort": {
+      "radio_configured": "Radio settings saved without refreshing AP data."
     }
   },
   "entity": {
@@ -94,6 +109,9 @@
       },
       "collector_busy": {
         "name": "AP access in use"
+      },
+      "rf_visible": {
+        "name": "5 GHz signal detected"
       }
     },
     "text": {
@@ -173,6 +191,31 @@
       },
       "ap_channel_5ghz": {
         "name": "5 GHz channel"
+      },
+      "rf_channel": {
+        "name": "Observed 5 GHz channel"
+      },
+      "rf_rssi": {
+        "name": "Observed 5 GHz signal strength"
+      },
+      "rf_status": {
+        "name": "5 GHz monitor status",
+        "state": {
+          "standby": "Standby",
+          "observe": "Observe",
+          "active": "Active",
+          "starting": "Starting",
+          "configuration_required": "Configuration required",
+          "waiting_for_access": "Waiting for access",
+          "check_failed": "Check failed",
+          "all_visible": "All visible",
+          "observing_missing": "Observing missing",
+          "all_missing_hold": "All missing hold",
+          "missing_wait": "Missing wait",
+          "clients_active_hold": "Clients active hold",
+          "clients_active": "Clients active",
+          "recovered": "Recovered"
+        }
       }
     }
   },
@@ -187,6 +230,15 @@
         "hostname": {
           "name": "HostName"
         }
+      }
+    }
+  },
+  "selector": {
+    "rf_mode": {
+      "options": {
+        "standby": "Standby",
+        "observe": "Observe only",
+        "active": "Monitor and recover"
       }
     }
   }

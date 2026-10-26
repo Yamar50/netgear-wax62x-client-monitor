@@ -15,7 +15,8 @@ from homeassistant.config_entries import ConfigEntryState
 
 from .const import DOMAIN, PLATFORMS
 from .coordinator import WaxCoordinator
-from .http import ConnectionView, ReservationView, SnapshotView
+from .http import ConnectionView, ReservationView, SnapshotView, RadioMonitorView
+from .radio_monitor import RadioMonitor
 
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 
@@ -24,8 +25,10 @@ async def async_setup(hass, config):
     hass.http.register_view(SnapshotView())
     hass.http.register_view(ReservationView())
     hass.http.register_view(ConnectionView())
+    hass.http.register_view(RadioMonitorView())
 
     probe_lock = asyncio.Lock()
+    hass.data[f"{DOMAIN}_scan_lock"] = probe_lock
     last_probe = float("-inf")
 
     async def wifi_scan_probe(call: ServiceCall):
@@ -33,6 +36,9 @@ async def async_setup(hass, config):
         nonlocal last_probe
         if probe_lock.locked() or time.monotonic() - last_probe < 120:
             raise ServiceValidationError("Wait two minutes between Wi-Fi probes")
+        coordinator = hass.data.get(DOMAIN)
+        if coordinator and coordinator.radio.state["mode"] != "standby":
+            raise ServiceValidationError("Put 5 GHz monitoring in standby before running a probe")
         from .wifi_probe import probe_wifi
 
         async with probe_lock:
@@ -71,6 +77,8 @@ async def async_setup_entry(hass, entry):
     coordinator = WaxCoordinator(hass, entry)
     entry.runtime_data = coordinator
     await coordinator.initialize()
+    coordinator.radio = RadioMonitor(coordinator)
+    await coordinator.radio.initialize()
     hass.data[DOMAIN] = coordinator
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     coordinator.device_names_ready = True
@@ -86,6 +94,7 @@ async def async_setup_entry(hass, entry):
 
 
 async def async_unload_entry(hass, entry):
+    await entry.runtime_data.radio.close()
     if await hass.config_entries.async_unload_platforms(entry, PLATFORMS):
         hass.data.pop(DOMAIN, None)
         return True

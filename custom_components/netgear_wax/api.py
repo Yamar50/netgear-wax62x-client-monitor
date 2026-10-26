@@ -6,6 +6,7 @@ import asyncio
 import base64
 from email.utils import formatdate
 import json
+import re
 import time
 
 import aiohttp
@@ -88,6 +89,14 @@ class WaxClient:
                 if response.status != 200:
                     raise WaxError("http_error")
                 if payload is None:
+                    if getattr(self, "strict_page", False):
+                        text = body.decode(errors="replace")
+                        if not (
+                            re.search(r"<title[^>]*>[^<]*NETGEAR[^<]*Wi-?Fi\s*6\s*AP[^<]*</title", text, re.I)
+                            and "vendor.bundle.js" in text
+                            and "app.bundle.js" in text
+                        ):
+                            raise WaxError("management_page_not_ready")
                     return {}
                 try:
                     result = json.loads(body)
@@ -95,6 +104,12 @@ class WaxClient:
                     raise WaxError("invalid_json") from err
                 if not isinstance(result, dict):
                     raise WaxError("invalid_response")
+                if getattr(self, "strict_status", False) and (
+                    type(result.get("status")) is not int or result["status"] != 0
+                ):
+                    if result.get("status") in (100, 401):
+                        raise AuthenticationError("authentication_failed")
+                    raise WaxError("api_not_ready")
                 if result.get("status") not in (0, "0"):
                     if login or result.get("status") in (100, 401, "100", "401"):
                         raise AuthenticationError("authentication_failed")
@@ -175,7 +190,9 @@ class WaxClient:
                 system, counts = await self.dashboard()
                 monitor = system["monitor"]
             await self.request("/connectedClients")
-            await self.socket({"system": {"monitor": {"radioApStatus": {"totalNumberOfStations": ""}, "clientList": ""}}})
+            await self.socket(
+                {"system": {"monitor": {"radioApStatus": {"totalNumberOfStations": ""}, "clientList": ""}}}
+            )
             await self.socket({"system": {"monitor": {"recentCliList": {"5": ""}}}})
             try:
                 # Capture both lists before the slower per-client detail reads.
