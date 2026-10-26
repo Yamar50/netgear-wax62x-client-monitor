@@ -167,8 +167,10 @@ async def test_ambiguous_off_still_attempts_on_and_keeps_cooldown(monitor):
     assert 'settings' not in another.calls
 
 
-async def test_cancellation_and_standby_wait_for_on_then_logout(monitor):
+@pytest.mark.parametrize('on_error', [False, True])
+async def test_cancellation_and_standby_wait_for_on_then_logout(monitor, on_error):
     client = Session()
+    client.on_error = on_error
     client.on_release = asyncio.Event()
     poll = asyncio.create_task(collect(client, monitor))
     await client.on_started.wait()
@@ -209,3 +211,18 @@ def test_payload_retains_non_radio_fields_and_rejects_incomplete_values():
 def test_unknown_uptime_rejected(value):
     with pytest.raises(WaxError):
         uptime_seconds(value)
+
+
+async def test_integration_unload_drains_on_and_logout(monitor):
+    client = Session()
+    client.on_release = asyncio.Event()
+    poll = asyncio.create_task(collect(client, monitor))
+    await client.on_started.wait()
+    closing = asyncio.create_task(monitor.close())
+    await asyncio.sleep(0)
+    assert not closing.done() and monitor.closing
+    client.on_release.set()
+    await poll
+    await closing
+    assert client.logout_ok
+    assert not monitor.recovery_due('a', time.time(), 2)

@@ -268,3 +268,34 @@ async def test_disabled_polling_does_not_login(coordinator, monkeypatch):
     monkeypatch.setattr("custom_components.netgear_wax.coordinator.WaxClient", forbidden)
     await coordinator._async_update_data()
     assert not coordinator.lease.status()["busy"]
+
+
+async def test_maintenance_hook_stays_inside_collector_lease_and_mode_lock(coordinator, monkeypatch):
+    import asyncio
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+    events = []
+    async def maintenance(client, result, cycle):
+        assert coordinator.radio.lock.locked()
+        assert coordinator.lease.status()['owner'] == 'home_assistant'
+        assert result['status'] == 'ok'
+        events.append('maintenance')
+    coordinator.radio = SimpleNamespace(lock=asyncio.Lock(), after_collection=AsyncMock(side_effect=maintenance))
+    class Client:
+        login_attempted = True
+        logout_ok = False
+        def __init__(self, config):
+            self.config = config
+        async def collect(self, after_collect=None):
+            events.append('read')
+            result = {'id': 'a', 'name': 'Test', 'status': 'ok', 'clients': []}
+            await after_collect(self, result)
+            assert coordinator.radio.lock.locked()
+            events.append('logout')
+            self.logout_ok = True
+            return result
+    monkeypatch.setattr('custom_components.netgear_wax.coordinator.WaxClient', Client)
+    await coordinator._async_update_data()
+    assert events == ['read', 'maintenance', 'logout']
+    assert not coordinator.radio.lock.locked() and not coordinator.lease.status()['busy']
+    coordinator.radio.after_collection.assert_awaited_once()

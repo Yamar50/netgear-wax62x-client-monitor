@@ -69,6 +69,7 @@ class RadioMonitor:
         self.task = None
         self.unsubscribe = None
         self.recovery_cycle = None
+        self.closing = False
 
     async def save(self):
         saved = deepcopy(self.state)
@@ -95,12 +96,13 @@ class RadioMonitor:
 
     @callback
     def tick(self, _now=None):
-        if self.state["mode"] == "standby" or self.hass.state is not CoreState.running:
+        if self.closing or self.state["mode"] == "standby" or self.hass.state is not CoreState.running:
             return
         if self.task is None or self.task.done():
             self.task = self.hass.async_create_task(self.run(), "WAX local RF monitor")
 
     async def close(self):
+        self.closing = True
         if self.unsubscribe:
             self.unsubscribe()
         if self.task and not self.task.done():
@@ -109,6 +111,9 @@ class RadioMonitor:
                 await self.task
             except asyncio.CancelledError:
                 pass
+        # Unload must also drain an owned collection/recovery/logout session.
+        async with self.lock:
+            pass
 
     def export(self):
         result = deepcopy(self.state)
@@ -158,7 +163,7 @@ class RadioMonitor:
         return self.export()
 
     async def run(self):
-        if self.lock.locked() or self.state["mode"] == "standby" or time.time() - self.last_attempt < INTERVAL:
+        if self.closing or self.lock.locked() or self.state["mode"] == "standby" or time.time() - self.last_attempt < INTERVAL:
             return self.export()
         async with self.lock:
             if self.state["mode"] == "standby":
@@ -200,7 +205,7 @@ class RadioMonitor:
 
     def recovery_due(self, ap_id, now, cycle):
         config = self.state["config"]
-        if self.state["mode"] != "observe" or not config.get("recovery_enabled", False):
+        if self.closing or self.state["mode"] != "observe" or not config.get("recovery_enabled", False):
             return False
         observed = self.state.get("observations", {})
         since = self.state["missing"].get(ap_id)
@@ -216,7 +221,7 @@ class RadioMonitor:
 
     async def after_collection(self, client, result, cycle):
         """Called under our mode lock and collector's lease before logout."""
-        if result.get("status") != "ok":
+        if self.closing or result.get("status") != "ok":
             return
         ap_id = client.config["id"]
         if self.state["mode"] == "standby":

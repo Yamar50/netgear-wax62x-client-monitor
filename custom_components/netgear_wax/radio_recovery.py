@@ -2,11 +2,13 @@
 
 import asyncio
 from copy import deepcopy
+import logging
 import re
 
 from .api import WaxError
 
 FIELDS = ("radioStatus", "operateMode", "guardInterval", "txPower", "channel", "channelWidth", "beamForming")
+_LOGGER = logging.getLogger(__name__)
 
 
 def uptime_seconds(value):
@@ -104,11 +106,14 @@ class SessionRadio:
         task = asyncio.create_task(apply_pair())
         try:
             await asyncio.shield(task)
-        except asyncio.CancelledError:
+        except asyncio.CancelledError as cancelled:
             # Keep the collection session, fleet reservation and mode lock
             # until ON has been attempted, then let collect() log out.
-            await task
-            raise
+            try:
+                await task
+            except Exception as err:
+                _LOGGER.warning("Radio ON not confirmed during cancellation: %s", type(err).__name__)
+            raise cancelled
         after = await self.details()
         if str(after["wlan1"]["radioStatus"]) != "1":
             raise WaxError("radio_restore_unconfirmed")
