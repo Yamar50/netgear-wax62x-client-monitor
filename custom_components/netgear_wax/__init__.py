@@ -8,6 +8,7 @@ from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.service import async_register_admin_service
 from homeassistant.exceptions import ServiceValidationError
+from homeassistant.config_entries import ConfigEntryState
 
 from .const import DOMAIN, PLATFORMS
 from .coordinator import WaxCoordinator
@@ -63,4 +64,23 @@ async def async_unload_entry(hass, entry):
 
 
 async def async_reload_entry(hass, entry):
+    coordinator = entry.runtime_data
+    settings = {**entry.data, **entry.options}
+    previous = {k: v for k, v in coordinator.settings.items() if k != "selected_clients"}
+    current = {k: v for k, v in settings.items() if k != "selected_clients"}
+    if previous == current:
+        # Rebuild entity platforms only. Keep the collector, cache, reservation
+        # and scheduled refresh alive; a client selection needs no AP login.
+        async with entry.setup_lock:
+            if entry.state is not ConfigEntryState.LOADED:
+                return
+            keep_polling = coordinator.async_add_listener(lambda: None)
+            try:
+                if not await hass.config_entries.async_unload_platforms(entry, PLATFORMS):
+                    raise ServiceValidationError("Unable to update client entities")
+                coordinator.select_clients(settings.get("selected_clients", []))
+                await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+            finally:
+                keep_polling()
+        return
     await hass.config_entries.async_reload(entry.entry_id)

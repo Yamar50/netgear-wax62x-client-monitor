@@ -140,6 +140,31 @@ async def test_stale_data_unavailable_even_without_poll(coordinator):
     assert entity.available is False
 
 
+@pytest.mark.parametrize("status,age,expected", [("ok", 10, False), ("unavailable", 10, None), ("ok", 3600, None)])
+async def test_select_absent_client_uses_original_cache_age(coordinator, status, age, expected):
+    observed = time.time() - age
+    coordinator.data = {
+        "clients": {},
+        "aps": {"a": {"id": "a", "status": status}},
+        "ap_clients": {"a": []},
+        "updated_timestamp": observed,
+        "updated_at": "unchanged",
+    }
+    coordinator.select_clients([MAC])
+    assert coordinator.export()["clients"][MAC]["connected"] is expected
+    assert coordinator.data["updated_timestamp"] == observed
+    assert coordinator.data["updated_at"] == "unchanged"
+
+
+async def test_select_client_does_not_override_active_lease(coordinator):
+    ticket = await coordinator.lease.acquire("consumer")
+    before = coordinator.lease.status()
+    coordinator.select_clients([MAC])
+    assert coordinator.lease.status() == before
+    assert coordinator.export()["clients"][MAC]["connected"] is None
+    await coordinator.lease.release("consumer", ticket["token"])
+
+
 async def test_disabled_polling_does_not_login(coordinator, monkeypatch):
     coordinator.settings["polling_enabled"] = False
 

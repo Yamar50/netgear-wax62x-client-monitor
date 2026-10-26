@@ -61,6 +61,20 @@ class WaxCoordinator(DataUpdateCoordinator):
         await self.save()
         self.async_update_listeners()
 
+    def select_clients(self, selected):
+        """Apply a selection to the existing observation, without advancing its age."""
+        self.settings["selected_clients"] = list(selected)
+        results = [
+            {
+                **self.data.get("aps", {}).get(ap["id"], {"status": "not_yet_collected"}),
+                "clients": self.data.get("ap_clients", {}).get(ap["id"], []),
+            }
+            for ap in self.settings["aps"]
+        ]
+        self.data["clients"] = reconcile(
+            self.data["clients"], results, selected, self.data.get("updated_timestamp") or 0
+        )
+
     def export(self):
         now = time.time()
         clients = {}

@@ -3,6 +3,8 @@
 import asyncio
 import logging
 import tempfile
+import time
+from unittest.mock import patch
 from homeassistant.core import HomeAssistant
 from homeassistant import bootstrap, loader
 
@@ -57,6 +59,72 @@ async def main():
             assert any(state.entity_id.startswith("text.wi_fi_") for state in states)
             assert len(states) == 28, len(states)
             print("selected_client_entities", len(states) - 8)
+            # Changing selection must keep the running coordinator/lease and
+            # timer, even when polling is enabled. No AP request is needed.
+            from custom_components.netgear_wax.coordinator import WaxCoordinator
+            from custom_components.netgear_wax.api import WaxClient
+
+            class Client:
+                login_attempted = True
+                logout_ok = True
+
+                def __init__(self, config):
+                    self.config = config
+
+                async def collect(self):
+                    return {"id": self.config["id"], "status": "ok", "clients": []}
+
+            with patch("custom_components.netgear_wax.coordinator.WaxClient", Client):
+                options = await hass.config_entries.options.async_init(entry.entry_id)
+                options = await hass.config_entries.options.async_configure(
+                    options["flow_id"], {"next_step_id": "collection"}
+                )
+                await hass.config_entries.options.async_configure(
+                    options["flow_id"], {"polling_enabled": True, "scan_interval": 600}
+                )
+                await hass.async_block_till_done()
+            coordinator = entry.runtime_data
+            original_timestamp = coordinator.data["updated_timestamp"]
+            original_timer = coordinator._unsub_refresh
+            ticket = await coordinator.lease.acquire("smoke-external")
+            lease_state = coordinator.lease.status()
+            await coordinator.set_hostname("02:00:00:00:00:01", "Saved name")
+            client1_ids = {s.entity_id for s in hass.states.async_all() if "02_00_00_00_00_01" in s.entity_id}
+            assert len(client1_ids) == 20
+            started = time.monotonic()
+            with (
+                patch.object(WaxClient, "collect", side_effect=AssertionError("Unexpected AP request")),
+                patch.object(WaxCoordinator, "initialize", side_effect=AssertionError("Unexpected reload")),
+            ):
+                for selected in (
+                    ["02:00:00:00:00:01", "02:00:00:00:00:02"],
+                    ["02:00:00:00:00:01"],
+                    ["02:00:00:00:00:01", "02:00:00:00:00:02"],
+                ):
+                    options = await hass.config_entries.options.async_init(entry.entry_id)
+                    options = await hass.config_entries.options.async_configure(
+                        options["flow_id"], {"next_step_id": "clients"}
+                    )
+                    known = coordinator.export()["clients"]
+                    await hass.config_entries.options.async_configure(
+                        options["flow_id"],
+                        {
+                            "selected_clients": [mac for mac in selected if mac in known],
+                            "manual_macs": "\n".join(mac for mac in selected if mac not in known),
+                        },
+                    )
+                    await hass.async_block_till_done()
+                    assert entry.state.value == "loaded"
+                    assert entry.runtime_data is coordinator
+                    assert coordinator._unsub_refresh is original_timer
+                    assert coordinator.lease.status() == lease_state
+                    assert coordinator.data["updated_timestamp"] == original_timestamp
+                    assert coordinator.names["02:00:00:00:00:01"] == "Saved name"
+                    assert all(hass.states.get(entity_id) is not None for entity_id in client1_ids)
+                    for mac in selected:
+                        assert coordinator.export()["clients"][mac]["connected"] is False
+            await coordinator.lease.release("smoke-external", ticket["token"])
+            print("selection_without_reload_or_AP_login", "PASS", round(time.monotonic() - started, 3))
             from custom_components.netgear_wax.http import SnapshotView, ReservationView
             from types import SimpleNamespace
 
