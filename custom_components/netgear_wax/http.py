@@ -1,5 +1,7 @@
 """Authenticated cache export and admin-only reservations. No AP access on GET."""
 
+import logging
+
 from aiohttp import web
 from homeassistant.components.http import HomeAssistantView
 from homeassistant.exceptions import HomeAssistantError
@@ -7,6 +9,8 @@ from homeassistant.exceptions import HomeAssistantError
 from .const import DOMAIN
 from .api import WaxError
 from .lease import BusyError, LeaseError
+
+_LOGGER = logging.getLogger(__name__)
 
 
 class ConnectionView(HomeAssistantView):
@@ -69,8 +73,9 @@ class RadioMonitorView(HomeAssistantView):
             return self.json({"error": "busy"}, status_code=409)
         except WaxError as error:
             return self.json({"error": "radio_operation_unconfirmed", "reason": str(error)}, status_code=503)
-        except (HomeAssistantError, OSError, TimeoutError):
-            return self.json({"error": "radio_operation_unconfirmed"}, status_code=503)
+        except (HomeAssistantError, OSError, TimeoutError) as error:
+            _LOGGER.exception("Radio operation failed before confirmation")
+            return self.json({"error": "radio_operation_unconfirmed", "reason": type(error).__name__}, status_code=503)
         return self.json(result)
 
 
