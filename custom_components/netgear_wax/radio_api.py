@@ -68,6 +68,18 @@ class WaxRadioClient(WaxClient):
             {"system": {"wlanSettings": {"wlanSettingTable": {"getRadioDetails": ""}}}}, "/WirelessBasic"
         )
         table = reply.get("system", {}).get("wlanSettings", {}).get("wlanSettingTable", {})
+        # getRadioDetails omits some fields on real firmware. Request those
+        # leaves explicitly; never substitute defaults before applying settings.
+        missing = {
+            band: {key: "" for key in FIELDS if table.get(band, {}).get(key) in (None, "")}
+            for band in ("wlan0", "wlan1")
+        }
+        missing = {band: fields for band, fields in missing.items() if fields}
+        if missing:
+            extra = await self.socket({"system": {"wlanSettings": {"wlanSettingTable": missing}}}, "/WirelessBasic")
+            extra = extra.get("system", {}).get("wlanSettings", {}).get("wlanSettingTable", {})
+            for band, fields in missing.items():
+                table.setdefault(band, {}).update({key: extra.get(band, {}).get(key) for key in fields})
         radio_payload(table, "1")
         return table
 

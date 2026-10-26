@@ -104,3 +104,25 @@ async def test_off_radio_only_gets_on():
     assert (await c.read_clients())["status"] == "recovered"
     assert c.apply.await_count == 1
     assert c.apply.await_args.args[0]["system"]["wlanSettings"]["wlanSettingTable"]["wlan1"]["radioStatus"] == "1"
+
+
+@pytest.mark.parametrize("extra,valid", [({"wlan0": {"beamForming": "0"}}, True), ({}, False)])
+async def test_missing_radio_field_is_read_explicitly_without_default(extra, valid):
+    c = WaxRadioClient({"host": "test.invalid"})
+    table = deepcopy(TABLE)
+    del table["wlan0"]["beamForming"]
+    c.socket = AsyncMock(
+        side_effect=[
+            {"system": {"wlanSettings": {"wlanSettingTable": table}}},
+            {"system": {"wlanSettings": {"wlanSettingTable": extra}}},
+        ]
+    )
+    if valid:
+        assert (await c.details())["wlan0"]["beamForming"] == "0"
+    else:
+        with pytest.raises(WaxError, match="incomplete_radio_settings:wlan0:beamForming"):
+            await c.details()
+    assert c.socket.await_args.args[0] == {
+        "system": {"wlanSettings": {"wlanSettingTable": {"wlan0": {"beamForming": ""}}}}
+    }
+    assert not c.mutation_started
