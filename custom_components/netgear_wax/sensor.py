@@ -38,7 +38,6 @@ async def async_setup_entry(hass, entry, async_add_entities):
         ClientMetric(coordinator, m, key) for m in coordinator.settings.get("selected_clients", []) for key in FIELDS
     ]
     entities.extend(APMetric(coordinator, ap, key) for ap in coordinator.settings["aps"] for key in AP_FIELDS)
-    entities.extend(RFMetric(coordinator, ap, key) for ap in coordinator.settings["aps"] for key in ("channel", "rssi"))
     entities.append(RFStatus(coordinator))
     async_add_entities(entities)
 
@@ -87,32 +86,21 @@ class APMetric(CoordinatorEntity, SensorEntity):
         return self.coordinator.export()["aps"].get(self.ap_id, {}).get("status") == "ok"
 
 
-class RFMetric(APMetric):
-    def __init__(self, coordinator, ap, key):
-        super().__init__(coordinator, ap, key)
-        self._attr_unique_id = f"ap_{self.ap_id}_rf_{key}"
-        self._attr_translation_key = f"rf_{key}"
-        if key == "rssi":
-            self._attr_device_class = SensorDeviceClass.SIGNAL_STRENGTH
-            self._attr_native_unit_of_measurement = "dBm"
-
-    @property
-    def native_value(self):
-        return self.coordinator.radio.export().get("observations", {}).get(self.ap_id, {}).get(self.key)
-
-    @property
-    def available(self):
-        return self.coordinator.radio.export().get("observations", {}).get(self.ap_id, {}).get("visible") is True
-
-
 class RFStatus(CoordinatorEntity, SensorEntity):
     _attr_has_entity_name = True
     _attr_translation_key = "rf_status"
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_device_class = SensorDeviceClass.ENUM
-    _attr_options = ["standby", "observe", "active", "starting", "configuration_required", "waiting_for_access",
-                     "check_failed", "all_visible", "observing_missing", "all_missing_hold", "missing_wait",
-                     "clients_active_hold", "clients_active", "recovered"]
+    _attr_options = [
+        "standby",
+        "observe",
+        "starting",
+        "configuration_required",
+        "waiting_for_access",
+        "check_failed",
+        "all_visible",
+        "observing_missing",
+    ]
 
     def __init__(self, coordinator):
         super().__init__(coordinator)
@@ -126,5 +114,4 @@ class RFStatus(CoordinatorEntity, SensorEntity):
     @property
     def extra_state_attributes(self):
         state = self.coordinator.radio.export()
-        return {k: state.get(k) for k in ("mode", "running", "checked_at", "interval_seconds", "scan_seconds",
-                                        "missing", "cooldowns", "last_action", "error")}
+        return {k: state.get(k) for k in ("mode", "running", "checked_at", "interval_seconds", "scan_seconds", "error")}

@@ -63,8 +63,6 @@ class RadioMonitorView(HomeAssistantView):
                 result = await radio.set_mode(data.get("mode"), data.get("hold_until", 0))
             elif operation == "check":
                 result = await radio.run()
-            elif operation == "preflight":
-                result = await radio.preflight()
             else:
                 raise ValueError("invalid_operation")
         except (ValueError, TypeError, web.HTTPBadRequest):

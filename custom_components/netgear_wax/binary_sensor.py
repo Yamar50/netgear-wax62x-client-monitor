@@ -27,8 +27,18 @@ class Connected(ClientEntity, BinarySensorEntity):
     @property
     def extra_state_attributes(self):
         row = self.row
-        return {k: row.get(k) for k in ("mac", "ap_name", "ssid", "connection_checked_at", "observed_at",
-                                      "connection_source", "connection_observed_at")}
+        return {
+            k: row.get(k)
+            for k in (
+                "mac",
+                "ap_name",
+                "ssid",
+                "connection_checked_at",
+                "observed_at",
+                "connection_source",
+                "connection_observed_at",
+            )
+        }
 
 
 class Busy(CoordinatorEntity, BinarySensorEntity):
@@ -68,3 +78,12 @@ class RFVisible(CoordinatorEntity, BinarySensorEntity):
     @property
     def available(self):
         return self.is_on is not None
+
+    @property
+    def extra_state_attributes(self):
+        state = self.coordinator.radio.export()
+        row = state.get("observations", {}).get(self.ap_id, {})
+        return {
+            "ssid": state.get("config", {}).get("ssid"),
+            "channel": row.get("channel") if row.get("visible") is True else None,
+        }

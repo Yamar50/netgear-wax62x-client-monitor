@@ -1,4 +1,4 @@
-"""Persistent local RF monitoring with exclusive AP access and guarded recovery."""
+"""Persistent passive RF monitoring without AP management requests."""
 
 import asyncio
 from copy import deepcopy
@@ -15,17 +15,16 @@ from homeassistant.core import CoreState
 from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.storage import Store
 
-from .api import WaxError, AuthenticationError, LoginLimitError, LogoutError
+from .api import WaxError
 from .const import DOMAIN
 from .lease import BusyError
 from .model import mac_address, iso_time
-from .radio_api import WaxRadioClient
 from .radio_scan import scan_wifi
 from .wifi_probe import fingerprint
 
 _LOGGER = logging.getLogger(__name__)
 INTERVAL = 600
-MODES = ("standby", "observe", "active")
+MODES = ("standby", "observe")
 
 
 def validate_config(config, aps):
@@ -54,12 +53,6 @@ def visibility(config, scan):
     return {key: rows.get(fingerprint(bytes.fromhex(mac.replace(":", "")))) for key, mac in config["targets"].items()}
 
 
-def next_missing(previous, visible, fleet_ready):
-    if not fleet_ready or not any(visible.values()):
-        return {key: 0 for key in visible}
-    return {key: 0 if row else previous.get(key, 0) + 1 for key, row in visible.items()}
-
-
 class RadioMonitor:
     def __init__(self, coordinator):
         self.coordinator = coordinator
@@ -70,7 +63,6 @@ class RadioMonitor:
         self.last_attempt = 0
         self.task = None
         self.unsubscribe = None
-        self.safe_release = True
 
     async def save(self):
         saved = deepcopy(self.state)
@@ -81,6 +73,8 @@ class RadioMonitor:
 
     async def initialize(self):
         self.state.update(await self.store.async_load() or {})
+        if self.state["mode"] not in MODES:
+            self.state["mode"] = "standby"
         # Preserve recovery cooldowns, never carry old missing streaks across boot.
         self.state.update(
             missing={}, observations={}, status="starting" if self.state["mode"] != "standby" else "standby"
@@ -137,7 +131,7 @@ class RadioMonitor:
             or not 0 <= hold_until <= time.time() + 86400
         ):
             raise ValueError("invalid_recovery_hold")
-        # Wait for a complete in-flight scan/recovery/logout before acknowledging.
+        # Wait for a complete in-flight scan before acknowledging.
         async with self.lock:
             if mode != "standby":
                 validate_config(self.state["config"], self.coordinator.settings["aps"])
@@ -156,46 +150,6 @@ class RadioMonitor:
         self.coordinator.async_update_listeners()
         return self.export()
 
-    async def call_ap(self, config, recover=False, inspect=False):
-        key = config["id"]
-        if self.coordinator.cooldowns.get(key, 0) > time.time():
-            raise WaxError("ap_login_cooldown")
-        client = WaxRadioClient(config, recover=recover, inspect=inspect)
-        try:
-            async with asyncio.timeout(60):
-                result = await client.collect()
-            if recover and not client.mutation_started:
-                self.state["cooldowns"].pop(key, None)
-            return result
-        except AuthenticationError, LoginLimitError, LogoutError:
-            self.coordinator.cooldowns[key] = time.time() + 3600
-            raise
-        finally:
-            if recover and not client.mutation_started:
-                self.state["cooldowns"].pop(key, None)
-            if client.login_attempted and not client.logout_ok:
-                self.safe_release = False
-                self.coordinator.cooldowns[key] = time.time() + 3600
-            await self.coordinator.save()
-
-    async def preflight(self):
-        """Read all readiness/radio settings without enabling or applying recovery."""
-        async with self.lock:
-            if self.state["mode"] == "active":
-                raise ValueError("use_standby_or_observe_for_preflight")
-            ticket = await self.coordinator.lease.acquire("radio_monitor", 3600, "collector")
-            self.safe_release = True
-            try:
-                async with asyncio.timeout(300):
-                    results = {
-                        ap["id"]: await self.call_ap(ap, inspect=True) for ap in self.coordinator.settings["aps"]
-                    }
-                return {"read_only": True, "aps": results}
-            finally:
-                if self.safe_release:
-                    await self.coordinator.lease.release("radio_monitor", ticket["token"])
-                self.coordinator.async_update_listeners()
-
     async def run(self):
         if self.lock.locked() or self.state["mode"] == "standby" or time.time() - self.last_attempt < INTERVAL:
             return self.export()
@@ -212,7 +166,6 @@ class RadioMonitor:
             self.last_attempt = time.time()
             if self.last_attempt - self.state.get("checked_timestamp", 0) > 2 * INTERVAL:
                 self.state["missing"] = {}
-            self.safe_release = True
             self.coordinator.async_update_listeners()
             try:
                 async with asyncio.timeout(300):
@@ -226,8 +179,7 @@ class RadioMonitor:
                 try:
                     await self.save()
                 finally:
-                    if self.safe_release:
-                        await self.coordinator.lease.release("radio_monitor", ticket["token"])
+                    await self.coordinator.lease.release("radio_monitor", ticket["token"])
                     self.coordinator.async_update_listeners()
         return self.export()
 
@@ -251,45 +203,8 @@ class RadioMonitor:
                 key: {
                     "visible": row is not None,
                     "channel": (row["frequency_mhz"] - 5000) // 5 if row else None,
-                    "rssi": row.get("signal_dbm") if row else None,
                 }
                 for key, row in visible.items()
             },
         )
-        if all(visible.values()):
-            self.state.update(status="all_visible", missing={key: 0 for key in visible})
-            return
-        if self.state["mode"] == "observe":
-            self.state.update(status="observing_missing", missing={})
-            return
-        # Missing cannot authorize writes until ALL configured APs are ready.
-        readiness = {}
-        for ap in self.coordinator.settings["aps"]:
-            readiness[ap["id"]] = await self.call_ap(ap)
-        self.state["missing"] = next_missing(self.state.get("missing", {}), visible, True)
-        if not any(visible.values()):
-            self.state["status"] = "all_missing_hold"
-            # Unlike an unassociated Mac adapter, this radio carries HA traffic.
-            # Never disconnect/restart it, nor touch any AP on an empty scan.
-            return
-        self.state["status"] = "missing_wait"
-        for ap in self.coordinator.settings["aps"]:
-            key = ap["id"]
-            if visible[key] or self.state["missing"][key] < 3 or self.state["cooldowns"].get(key, 0) > now:
-                continue
-            if readiness[key]["clients_5ghz"] > 0:
-                self.state["missing"][key] = 0
-                self.state["status"] = "clients_active_hold"
-                continue
-            # Write intent before mutation so a crash cannot trigger an early retry.
-            self.state["cooldowns"][key] = time.time() + 3600
-            self.state["last_action"] = {"ap_id": key, "at": iso_time(time.time()), "result": "pending"}
-            await self.save()
-            result = await self.call_ap(ap, recover=True)
-            if result["status"] == "recovered":
-                self.state["cooldowns"][key] = time.time() + 3600
-            self.state["last_action"]["result"] = result["status"]
-            self.state["status"] = result["status"]
-            self.state["missing"][key] = 0
-            _LOGGER.warning("5 GHz recovery result for %s: %s", ap["name"], result["status"])
-            break
+        self.state["status"] = "all_visible" if all(visible.values()) else "observing_missing"

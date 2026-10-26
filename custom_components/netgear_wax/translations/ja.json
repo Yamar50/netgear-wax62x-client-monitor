@@ -80,7 +80,7 @@
       },
       "radio_monitor": {
         "title": "5GHz電波監視",
-        "description": "10分ごとに周囲の電波を確認します。対象は「AP名 = 5GHzのBSSID」を1行に1台入力してください。設定を変更する前に待機へ切り替えてください。「監視と復旧」はほかの監視を停止してから有効にしてください。全AP未検出時もHA自身のWi-Fiは再起動しません。",
+        "description": "10分ごとに周囲の電波を確認します。「AP名 = 5GHzのBSSID」を1行に1台入力してください。既存のAPデバイスに受信状態だけを追加し、詳細にSSIDと実測チャンネルを表示します。APの設定変更・自動復旧は行いません。",
         "data": {
           "interface": "無線インターフェース",
           "ssid": "対象SSID",
@@ -192,29 +192,17 @@
       "ap_channel_5ghz": {
         "name": "5GHzチャンネル"
       },
-      "rf_channel": {
-        "name": "実測5GHzチャンネル"
-      },
-      "rf_rssi": {
-        "name": "実測5GHz受信強度"
-      },
       "rf_status": {
         "name": "5GHz監視状態",
         "state": {
           "standby": "待機",
           "observe": "監視のみ",
-          "active": "監視と復旧",
           "starting": "開始待ち",
           "configuration_required": "設定が必要",
           "waiting_for_access": "AP使用予約待ち",
-          "check_failed": "確認失敗・復旧保留",
+          "check_failed": "確認失敗",
           "all_visible": "全APの電波を受信",
-          "observing_missing": "未検出あり・監視のみ",
-          "all_missing_hold": "全AP未検出・復旧保留",
-          "missing_wait": "連続未検出を確認中",
-          "clients_active_hold": "接続端末あり・復旧保留",
-          "clients_active": "接続端末あり・復旧中止",
-          "recovered": "復旧操作完了"
+          "observing_missing": "未検出あり"
         }
       }
     }
@@ -237,8 +225,7 @@
     "rf_mode": {
       "options": {
         "standby": "待機",
-        "observe": "監視のみ",
-        "active": "監視と復旧"
+        "observe": "監視のみ"
       }
     }
   }

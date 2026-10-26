@@ -71,7 +71,7 @@ async def test_radio_api_requires_admin_and_loaded_monitor(coordinator):
         assert (await method(Request(coordinator))).status == 503
 
 
-async def test_radio_mode_ack_and_readonly_preflight(coordinator):
+async def test_radio_mode_ack_and_unknown_operation(coordinator):
     radio = SimpleNamespace(
         set_mode=AsyncMock(return_value={"mode": "standby", "running": False}),
         preflight=AsyncMock(return_value={"read_only": True}),
@@ -81,6 +81,6 @@ async def test_radio_mode_ack_and_readonly_preflight(coordinator):
     response = await view.post(Request(coordinator, {"operation": "set_mode", "mode": "standby"}))
     assert json.loads(response.body) == {"mode": "standby", "running": False}
     radio.set_mode.assert_awaited_once_with("standby", 0)
-    assert (await view.post(Request(coordinator, {"operation": "preflight"}))).status == 200
-    radio.preflight.assert_awaited_once()
+    assert (await view.post(Request(coordinator, {"operation": "preflight"}))).status == 400
+    radio.preflight.assert_not_awaited()
     assert (await view.post(Request(coordinator, {"operation": "invalid"}))).status == 400

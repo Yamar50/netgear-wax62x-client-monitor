@@ -7,9 +7,8 @@ from unittest.mock import AsyncMock, Mock
 from homeassistant.core import HomeAssistant
 import pytest
 
-from custom_components.netgear_wax.api import WaxError, LogoutError
 from custom_components.netgear_wax.lease import LeaseManager
-from custom_components.netgear_wax.radio_monitor import RadioMonitor, validate_config, next_missing
+from custom_components.netgear_wax.radio_monitor import RadioMonitor, validate_config
 from custom_components.netgear_wax.wifi_probe import fingerprint
 
 APS = [{"id": str(i), "name": f"Test{i}"} for i in range(4)]
@@ -38,18 +37,15 @@ def scan(missing=()):
 async def monitor(tmp_path, monkeypatch):
     hass = HomeAssistant(str(tmp_path))
     hass.data["netgear_wax_scan_lock"] = asyncio.Lock()
-    coordinator = SimpleNamespace(
+    co = SimpleNamespace(
         hass=hass,
         entry=SimpleNamespace(entry_id="synthetic"),
         settings={"aps": APS},
-        cooldowns={},
         lease=LeaseManager(AsyncMock()),
-        save=AsyncMock(),
         async_update_listeners=Mock(),
     )
-    radio = RadioMonitor(coordinator)
-    radio.state.update(mode="active", config=deepcopy(CONFIG))
-    radio.call_ap = AsyncMock(return_value={"status": "ready", "clients_5ghz": 0, "uptime_seconds": 1000})
+    radio = RadioMonitor(co)
+    radio.state.update(mode="observe", config=deepcopy(CONFIG))
     monkeypatch.setattr("custom_components.netgear_wax.radio_monitor.scan_wifi", lambda interface: scan())
     yield radio
     await radio.close()
@@ -67,99 +63,52 @@ def test_targets_must_cover_exact_fleet_without_duplicates():
         validate_config(bad, APS)
 
 
-def test_streaks_need_partial_visibility_and_full_ready_fleet():
-    assert next_missing({"a": 2, "b": 2}, {"a": None, "b": {"seen": True}}, True) == {"a": 3, "b": 0}
-    assert next_missing({"a": 2}, {"a": None}, True) == {"a": 0}
-    assert next_missing({"a": 2}, {"a": None}, False) == {"a": 0}
-
-
-async def test_all_visible_does_not_log_into_any_ap(monitor):
+async def test_all_visible_with_channel_and_no_rssi(monitor):
     await monitor.run()
     assert monitor.state["status"] == "all_visible"
-    monitor.call_ap.assert_not_awaited()
+    assert all(row == {"visible": True, "channel": 36} for row in monitor.state["observations"].values())
     assert not monitor.coordinator.lease.status()["busy"]
 
 
-async def test_three_completed_scans_only_one_recovery_and_durable_hold(monitor, monkeypatch):
-    monkeypatch.setattr("custom_components.netgear_wax.radio_monitor.scan_wifi", lambda interface: scan(("2", "3")))
-    recoveries = []
-
-    async def call(ap, recover=False):
-        if recover:
-            assert monitor.state["cooldowns"][ap["id"]] > time.time() + 3500
-            recoveries.append(ap["id"])
-            return {"status": "recovered"}
-        return {"status": "ready", "clients_5ghz": 0}
-
-    monitor.call_ap = call
-    for _ in range(3):
-        monitor.last_attempt = 0
-        await monitor.run()
-    assert recoveries == ["2"]
-    assert monitor.state["missing"]["3"] == 3
-    assert monitor.state["cooldowns"]["2"] > time.time() + 3500
-
-
-async def test_manual_recheck_cannot_accelerate_streak(monitor, monkeypatch):
+async def test_completed_partial_scan_only_marks_absent_target_off(monitor, monkeypatch):
     monkeypatch.setattr("custom_components.netgear_wax.radio_monitor.scan_wifi", lambda interface: scan(("3",)))
     await monitor.run()
+    assert monitor.state["status"] == "observing_missing"
+    assert monitor.state["observations"]["3"] == {"visible": False, "channel": None}
+    assert monitor.state["observations"]["2"]["visible"] is True
+
+
+async def test_failed_scan_is_unknown_not_disconnected(monitor, monkeypatch):
     await monitor.run()
-    await monitor.run()
-    assert monitor.state["missing"]["3"] == 1
 
+    def fail(interface):
+        raise TimeoutError("scan_completion_timeout")
 
-async def test_empty_scan_never_toggles_ha_wifi_or_ap(monitor, monkeypatch):
-    monkeypatch.setattr(
-        "custom_components.netgear_wax.radio_monitor.scan_wifi", lambda interface: scan(("0", "1", "2", "3"))
-    )
-    for _ in range(4):
-        monitor.last_attempt = 0
-        await monitor.run()
-    assert monitor.state["status"] == "all_missing_hold"
-    assert not any(monitor.state["missing"].values())
-    assert all(not call.kwargs.get("recover", False) for call in monitor.call_ap.await_args_list)
-
-
-async def test_one_unready_ap_clears_streaks_and_does_not_recover(monitor, monkeypatch):
-    monkeypatch.setattr("custom_components.netgear_wax.radio_monitor.scan_wifi", lambda interface: scan(("3",)))
-    monitor.state["missing"] = {"3": 2}
-    monitor.call_ap.side_effect = WaxError("boot_grace")
+    monkeypatch.setattr("custom_components.netgear_wax.radio_monitor.scan_wifi", fail)
+    monitor.last_attempt = 0
     await monitor.run()
     assert monitor.state["status"] == "check_failed"
-    assert monitor.state["missing"] == {}
-    assert all(x["visible"] is None for x in monitor.state["observations"].values())
+    assert all(row["visible"] is None for row in monitor.state["observations"].values())
 
 
-async def test_observe_only_does_not_login_when_missing(monitor, monkeypatch):
-    monitor.state["mode"] = "observe"
-    monkeypatch.setattr("custom_components.netgear_wax.radio_monitor.scan_wifi", lambda interface: scan(("3",)))
+async def test_manual_recheck_does_not_accelerate_scan(monitor, monkeypatch):
+    scanner = Mock(return_value=scan())
+    monkeypatch.setattr("custom_components.netgear_wax.radio_monitor.scan_wifi", scanner)
     await monitor.run()
-    monitor.call_ap.assert_not_awaited()
-    assert monitor.state["status"] == "observing_missing"
-
-
-async def test_active_clients_stop_recovery(monitor, monkeypatch):
-    monkeypatch.setattr("custom_components.netgear_wax.radio_monitor.scan_wifi", lambda interface: scan(("3",)))
-    monitor.state.update(missing={"3": 2}, checked_timestamp=time.time())
-    monitor.call_ap.return_value = {"status": "ready", "clients_5ghz": 1}
     await monitor.run()
-    assert monitor.state["status"] == "clients_active_hold"
-    assert monitor.state["missing"]["3"] == 0
-    assert all(not call.kwargs.get("recover", False) for call in monitor.call_ap.await_args_list)
+    scanner.assert_called_once()
 
 
-async def test_external_reservation_blocks_scan_and_ap_calls(monitor, monkeypatch):
+async def test_external_reservation_blocks_scan(monitor, monkeypatch):
     monkeypatch.setattr(
-        "custom_components.netgear_wax.radio_monitor.scan_wifi", lambda interface: pytest.fail("scan during lease")
+        "custom_components.netgear_wax.radio_monitor.scan_wifi", lambda interface: pytest.fail("reserved")
     )
     await monitor.coordinator.lease.acquire("external")
     await monitor.run()
-    assert monitor.last_attempt == 0
-    assert monitor.state["status"] == "waiting_for_access"
-    monitor.call_ap.assert_not_awaited()
+    assert monitor.last_attempt == 0 and monitor.state["status"] == "waiting_for_access"
 
 
-async def test_standby_ack_waits_for_inflight_operation(monitor):
+async def test_standby_ack_waits_for_inflight_scan(monitor):
     await monitor.lock.acquire()
     transition = asyncio.create_task(monitor.set_mode("standby"))
     await asyncio.sleep(0)
@@ -169,30 +118,17 @@ async def test_standby_ack_waits_for_inflight_operation(monitor):
     assert ack["mode"] == "standby" and not ack["running"]
 
 
-async def test_handoff_keeps_recovery_cooldown(monitor):
+async def test_legacy_cooldown_can_be_carried_back_without_recovery(monitor):
     hold = time.time() + 1800
-    await monitor.set_mode("active", hold)
+    await monitor.set_mode("observe", hold)
     assert all(x >= hold for x in monitor.state["cooldowns"].values())
     await monitor.set_mode("standby")
     assert all(x >= hold for x in monitor.state["cooldowns"].values())
+    with pytest.raises(ValueError):
+        await monitor.set_mode("active")
 
 
-async def test_logout_failure_holds_fleet_lease(monitor, monkeypatch):
-    monkeypatch.setattr("custom_components.netgear_wax.radio_monitor.scan_wifi", lambda interface: scan(("3",)))
-
-    class Client:
-        login_attempted = True
-        logout_ok = False
-        mutation_started = False
-
-        def __init__(self, *args, **kwargs):
-            pass
-
-        async def collect(self):
-            raise LogoutError("logout_failed")
-
-    monkeypatch.setattr("custom_components.netgear_wax.radio_monitor.WaxRadioClient", Client)
-    del monitor.call_ap
+async def test_old_results_expire_to_unknown(monitor):
     await monitor.run()
-    assert monitor.coordinator.lease.status()["busy"]
-    assert monitor.coordinator.cooldowns["0"] > time.time() + 3500
+    monitor.state["checked_timestamp"] = time.time() - 1201
+    assert all(row["visible"] is None for row in monitor.export()["observations"].values())
