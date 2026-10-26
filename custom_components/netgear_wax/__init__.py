@@ -3,8 +3,9 @@
 from datetime import timedelta
 
 import voluptuous as vol
-from homeassistant.core import ServiceCall
+from homeassistant.core import ServiceCall, SupportsResponse
 from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.service import async_register_admin_service
 from homeassistant.exceptions import ServiceValidationError
@@ -26,9 +27,12 @@ async def async_setup(hass, config):
         if coordinator is None:
             raise ServiceValidationError("Integration is not loaded")
         try:
-            await coordinator.set_hostname(call.data["mac"], call.data["hostname"])
+            result = await coordinator.set_hostname(call.data["mac"], call.data["hostname"])
         except ValueError as err:
             raise ServiceValidationError(str(err)) from err
+        entity_id = er.async_get(hass).async_get_entity_id("text", DOMAIN, f"{result['mac']}_hostname")
+        selected = result["mac"] in coordinator.settings.get("selected_clients", [])
+        return {**result, "entity_registered": bool(selected and entity_id), "entity_id": entity_id if selected else None}
 
     async_register_admin_service(
         hass,
@@ -36,6 +40,7 @@ async def async_setup(hass, config):
         "set_hostname",
         set_hostname,
         schema=vol.Schema({vol.Required("mac"): str, vol.Required("hostname"): str}),
+        supports_response=SupportsResponse.OPTIONAL,
     )
     return True
 

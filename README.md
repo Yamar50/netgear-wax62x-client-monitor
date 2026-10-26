@@ -90,6 +90,12 @@ data:
   hostname: "Family phone"
 ```
 
+未登録のMACにも名前を先に保存できます。後で「クライアントを登録」でそのMACを選ぶと、保存済みのHostNameが使われます。このアクション自体はデバイスを追加せず、APへの取得も行いません。
+
+外部から同期する場合は `POST /api/services/netgear_wax/set_hostname?return_response` を使用します。`service_response` に `mac`、`hostname`、`stored: true`、`entity_registered`、`entity_id` が返ります。`stored` は保存ファイルの読み戻し確認後に返し、`entity_registered: false` でも名前の保存は成功です。エンティティ未登録時の `entity_id` は `null` です。認証にはHA管理者のトークンが必要です。
+
+送信元はMACと名前が一致する保存確認を受け取ったものだけを送信済みにし、応答が得られなかった場合は同じ内容を再試行できます。HA側の手動編集と外部同期の優先順位は送信元で決めてください。通常のHA画面からの、応答を要求しない呼び出しも引き続き使用できます。
+
 ## 検証と制限
 
 Home Assistant 2026.10.4 / Python 3.14で開発しています。テストは架空のAP・端末データを使用します。

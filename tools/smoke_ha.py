@@ -89,6 +89,13 @@ async def main():
             ticket = await coordinator.lease.acquire("smoke-external")
             lease_state = coordinator.lease.status()
             await coordinator.set_hostname("02:00:00:00:00:01", "Saved name")
+            pending_mac = "02:00:00:00:00:02"
+            response = await hass.services.async_call(
+                "netgear_wax", "set_hostname", {"mac": pending_mac, "hostname": "Pre-saved name"},
+                blocking=True, return_response=True,
+            )
+            assert response == {"mac": pending_mac, "hostname": "Pre-saved name", "stored": True,
+                                "entity_registered": False, "entity_id": None}
             client1_ids = {s.entity_id for s in hass.states.async_all() if "02_00_00_00_00_01" in s.entity_id}
             assert len(client1_ids) == 20
             started = time.monotonic()
@@ -120,11 +127,19 @@ async def main():
                     assert coordinator.lease.status() == lease_state
                     assert coordinator.data["updated_timestamp"] == original_timestamp
                     assert coordinator.names["02:00:00:00:00:01"] == "Saved name"
+                    if pending_mac in selected:
+                        response = await hass.services.async_call(
+                            "netgear_wax", "set_hostname", {"mac": pending_mac, "hostname": "Pre-saved name"},
+                            blocking=True, return_response=True,
+                        )
+                        assert response["entity_registered"] is True
+                        assert hass.states.get(response["entity_id"]).state == "Pre-saved name"
                     assert all(hass.states.get(entity_id) is not None for entity_id in client1_ids)
                     for mac in selected:
                         assert coordinator.export()["clients"][mac]["connected"] is False
             await coordinator.lease.release("smoke-external", ticket["token"])
             print("selection_without_reload_or_AP_login", "PASS", round(time.monotonic() - started, 3))
+            print("hostname_response_and_later_registration", "PASS")
             from custom_components.netgear_wax.http import SnapshotView, ReservationView
             from types import SimpleNamespace
 

@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from datetime import timedelta
 import logging
+from pathlib import Path
 import time
 
+from homeassistant.core import CoreState
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
@@ -26,7 +30,8 @@ class WaxCoordinator(DataUpdateCoordinator):
         super().__init__(
             hass, _LOGGER, config_entry=entry, name=DOMAIN, update_interval=timedelta(seconds=self.interval)
         )
-        self.store = Store(hass, 1, f"{DOMAIN}.{entry.entry_id}")
+        self.store = Store(hass, 1, f"{DOMAIN}.{entry.entry_id}", atomic_writes=True)
+        self._save_lock = asyncio.Lock()
         self.lease_store = Store(hass, 1, f"{DOMAIN}.{entry.entry_id}.lease")
         self.names = {}
         self.cooldowns = {}
@@ -48,18 +53,36 @@ class WaxCoordinator(DataUpdateCoordinator):
         await self.async_config_entry_first_refresh()
 
     async def save(self):
-        await self.store.async_save({"names": self.names, "cooldowns": self.cooldowns, "data": self.data})
+        async with self._save_lock:
+            await self.store.async_save({"names": dict(self.names), "cooldowns": self.cooldowns, "data": self.data})
 
     async def set_hostname(self, mac, hostname):
         mac = mac_address(mac)
         if len(hostname) > 255 or any(ord(c) < 32 for c in hostname):
             raise ValueError("Invalid hostname")
-        if hostname:
-            self.names[mac] = hostname
-        else:
-            self.names.pop(mac, None)
-        await self.save()
+        async with self._save_lock:
+            if self.hass.state is CoreState.stopping:
+                raise HomeAssistantError("Home Assistant is stopping; retry later")
+            names = dict(self.names)
+            if hostname:
+                names[mac] = hostname
+            else:
+                names.pop(mac, None)
+            await self.store.async_save({"names": names, "cooldowns": self.cooldowns, "data": self.data})
+            # Store logs some write failures instead of raising. Confirm the
+            # file, not just the HTTP call or an in-memory entity update.
+            try:
+                saved = await self.hass.async_add_executor_job(self._read_saved_names)
+            except (OSError, ValueError, KeyError) as err:
+                raise HomeAssistantError("HostName storage confirmation failed") from err
+            if saved != names:
+                raise HomeAssistantError("HostName storage confirmation failed")
+            self.names = names
         self.async_update_listeners()
+        return {"mac": mac, "hostname": hostname, "stored": True}
+
+    def _read_saved_names(self):
+        return json.loads(Path(self.store.path).read_text())["data"]["names"]
 
     def select_clients(self, selected):
         """Apply a selection to the existing observation, without advancing its age."""

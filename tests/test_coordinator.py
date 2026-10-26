@@ -115,6 +115,50 @@ async def test_names_do_not_change_identity_or_get_overwritten(coordinator):
     assert MAC not in coordinator.names
 
 
+async def test_unselected_hostname_is_persisted_and_survives_reload(coordinator):
+    from custom_components.netgear_wax.text import Hostname
+    unknown = "02:00:00:00:00:02"
+    result = await coordinator.set_hostname(unknown, "Future phone")
+    assert result == {"mac": unknown, "hostname": "Future phone", "stored": True}
+    assert unknown not in coordinator.settings["selected_clients"]
+    restored = WaxCoordinator(coordinator.hass, coordinator.config_entry)
+    saved = await restored.store.async_load()
+    assert saved["names"][unknown] == "Future phone"
+    assert Hostname(coordinator, unknown, "hostname").native_value == "Future phone"
+    await restored.async_shutdown()
+
+
+async def test_swallowed_storage_failure_has_no_false_ack(coordinator, monkeypatch):
+    from homeassistant.exceptions import HomeAssistantError
+    await coordinator.set_hostname(MAC, "Original")
+    async def silent_failure(data):
+        pass
+    monkeypatch.setattr(coordinator.store, "async_save", silent_failure)
+    with pytest.raises(HomeAssistantError, match="confirmation failed"):
+        await coordinator.set_hostname(MAC, "Not saved")
+    assert coordinator.names[MAC] == "Original"
+
+
+async def test_concurrent_names_are_not_lost(coordinator):
+    import asyncio
+    other = "02:00:00:00:00:02"
+    await asyncio.gather(coordinator.set_hostname(MAC, "One"), coordinator.set_hostname(other, "Two"))
+    assert coordinator._read_saved_names() == {MAC: "One", other: "Two"}
+
+
+async def test_no_ack_for_deferred_save_while_stopping(coordinator):
+    from homeassistant.core import CoreState
+    from homeassistant.exceptions import HomeAssistantError
+    old = coordinator.hass.state
+    coordinator.hass.state = CoreState.stopping
+    try:
+        with pytest.raises(HomeAssistantError, match="stopping"):
+            await coordinator.set_hostname(MAC, "Deferred")
+        assert coordinator.names == {}
+    finally:
+        coordinator.hass.state = old
+
+
 async def test_all_metric_entities_construct_and_rssi_keeps_raw_value(coordinator):
     coordinator.data = {
         "clients": {MAC: {"mac": MAC, "connected": True, "fresh": True, "rssi": 48}},
