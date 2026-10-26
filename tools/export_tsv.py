@@ -1,0 +1,154 @@
+#!/usr/bin/env python3
+"""Export HA cache to the legacy WAX monitor TSV format without AP logins."""
+
+import argparse
+from collections import Counter
+import hashlib
+import json
+import os
+from pathlib import Path
+import time
+
+from ha_client import HAClient
+
+COLUMNS = [
+    "MAC Address",
+    "IP Address",
+    "Host Name",
+    "BSSID",
+    "SSID",
+    "Channel",
+    "Channel Width",
+    "Tx Rate",
+    "Rx Rate",
+    "RSSI",
+    "Tx Bytes",
+    "Rx Bytes",
+    "State",
+    "Type",
+    "Mode",
+    "Status",
+    "Idle Time",
+    "Assoc Time Stamp",
+    "VLAN ID",
+    "PMF Support",
+    "AP Name",
+    "Band",
+    "AP Uptime",
+    "LAST UPDATE TIME",
+]
+
+
+def cell(value):
+    if value is None or value == "":
+        return "-"
+    return str(value).replace("\t", " ").replace("\n", " ").replace("\r", " ")
+
+
+def unit(value, suffix):
+    return None if value is None else f"{format(value, '.6f').rstrip('0').rstrip('.')} {suffix}"
+
+
+def convert(snapshot, now=None):
+    if snapshot.get("schema_version") != 1 or not isinstance(snapshot.get("clients"), dict):
+        raise ValueError("Unsupported snapshot")
+    now = time.time() if now is None else now
+    stale = now - (snapshot.get("updated_timestamp") or 0) > snapshot["freshness_limit"]
+    aps = snapshot["aps"]
+    rows = []
+    counts = Counter()
+    for mac, client in sorted(snapshot["clients"].items()):
+        if not client.get("observed_at"):
+            continue
+        ap = aps.get(client.get("ap_id"), {})
+        connected = client.get("connected") if not stale else None
+        status = "Authenticated" if connected is True else "Disconnect"
+        # Existing viewer uses Disconnect for unconfirmed rows; HA retains the
+        # stronger distinction (unknown vs confirmed disconnected) in its API.
+        pmf = client.get("pmf")
+        name = client.get("ap_name") or ap.get("name") or "-"
+        values = [
+            mac,
+            client.get("ip"),
+            client.get("hostname"),
+            client.get("bssid"),
+            client.get("ssid"),
+            client.get("channel"),
+            client.get("channel_width"),
+            unit(client.get("tx_rate"), "bps"),
+            unit(client.get("rx_rate"), "bps"),
+            client.get("rssi"),
+            unit(client.get("tx_bytes"), "B"),
+            unit(client.get("rx_bytes"), "B"),
+            client.get("state") if connected else "Disconnect",
+            client.get("security"),
+            client.get("mode"),
+            status,
+            client.get("idle_time"),
+            client.get("association_time"),
+            client.get("vlan_id"),
+            None if pmf is None else "Yes" if pmf else "No",
+            name.upper(),
+            client.get("band"),
+            ap.get("uptime"),
+            client.get("observed_at"),
+        ]
+        rows.append("\t".join(map(cell, values)))
+        counts[name.upper()] += 1
+    tsv = "\t".join(COLUMNS) + "\n" + "".join(row + "\n" for row in rows)
+    status = {
+        "version": 1,
+        "generatedAt": snapshot.get("updated_at") or snapshot["generated_at"],
+        "source": "home_assistant",
+        "stale": stale,
+        "tsvSha256": hashlib.sha256(tsv.encode()).hexdigest(),
+        "aps": [
+            {
+                "name": ap["name"].upper(),
+                "status": "ok" if ap.get("status") == "ok" and not stale else "unavailable",
+                "rows": counts[ap["name"].upper()],
+            }
+            for ap in aps.values()
+        ],
+    }
+    return tsv, status
+
+
+def atomic_write(path, value):
+    path = Path(path)
+    temporary = path.with_name(path.name + f".tmp.{os.getpid()}")
+    try:
+        with temporary.open("x", encoding="utf-8") as handle:
+            os.chmod(temporary, 0o600)
+            handle.write(value)
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--config", required=True)
+    parser.add_argument("--output", required=True)
+    args = parser.parse_args()
+    target = Path(args.output)
+    lock = target.with_name(target.name + ".ha-lock")
+    try:
+        lock.mkdir(mode=0o700)
+    except FileExistsError:
+        raise SystemExit("Another cache export is active; inspect stale lock before removal")
+    try:
+        snapshot = HAClient(args.config).request("/api/netgear_wax/snapshot")
+        tsv, status = convert(snapshot)
+        if not snapshot.get("updated_at"):
+            raise SystemExit("HA has not collected yet; existing output retained")
+        if target.exists():
+            atomic_write(target.parent / "WAX625_OLD_ClientDetails.tsv", target.read_text())
+        atomic_write(target, tsv)
+        atomic_write(str(target) + ".status.json", json.dumps(status, ensure_ascii=False) + "\n")
+    finally:
+        lock.rmdir()
+
+
+if __name__ == "__main__":
+    main()

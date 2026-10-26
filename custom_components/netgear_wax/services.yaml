@@ -1,0 +1,12 @@
+set_hostname:
+  fields:
+    mac:
+      required: true
+      example: "02:00:00:00:00:01"
+      selector:
+        text:
+    hostname:
+      required: true
+      example: "Family phone"
+      selector:
+        text:

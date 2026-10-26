@@ -1,0 +1,193 @@
+{
+  "title": "NETGEAR WAX62x Client Monitor",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Add access point",
+        "data": {
+          "name": "AP name",
+          "host": "AP hostname or IPv4 address",
+          "username": "Username",
+          "password": "Password (leave blank to keep when editing)",
+          "verify_ssl": "Verify HTTPS certificate"
+        },
+        "description": "Polling starts disabled. Add all APs, stop other collectors or protect them with HA reservations, then enable polling in Configure. No login is attempted by this form."
+      }
+    },
+    "error": {
+      "invalid_host": "Enter only a hostname or IPv4 address.",
+      "missing_password": "Enter a password.",
+      "duplicate_host": "This AP is already configured.",
+      "last_ap": "The last AP cannot be removed here.",
+      "invalid_mac": "A MAC address is invalid.",
+      "invalid_input": "Check the entered values."
+    },
+    "abort": {
+      "already_configured": "Only one fleet is supported. Add APs via Configure."
+    }
+  },
+  "options": {
+    "step": {
+      "add_ap": {
+        "title": "Add access point",
+        "data": {
+          "name": "AP name",
+          "host": "AP hostname or IPv4 address",
+          "username": "Username",
+          "password": "Password (leave blank to keep when editing)",
+          "verify_ssl": "Verify HTTPS certificate"
+        }
+      },
+      "edit_ap": {
+        "title": "Edit access point",
+        "data": {
+          "name": "AP name",
+          "host": "AP hostname or IPv4 address",
+          "username": "Username",
+          "password": "Password (leave blank to keep when editing)",
+          "verify_ssl": "Verify HTTPS certificate",
+          "remove": "Remove this AP"
+        }
+      },
+      "choose_ap": {
+        "title": "Choose access point",
+        "data": {
+          "ap_id": "Access point"
+        }
+      },
+      "collection": {
+        "title": "Collection settings",
+        "data": {
+          "polling_enabled": "Enable polling (stop other collectors first)",
+          "scan_interval": "Polling interval (seconds)"
+        }
+      },
+      "clients": {
+        "title": "Client devices",
+        "data": {
+          "selected_clients": "Clients to register",
+          "manual_macs": "Additional MAC addresses (one per line)"
+        }
+      },
+      "init": {
+        "menu_options": {
+          "collection": "Collection settings",
+          "add_ap": "Add access point",
+          "choose_ap": "Choose access point",
+          "clients": "Client devices"
+        }
+      }
+    },
+    "error": {
+      "invalid_host": "Enter only a hostname or IPv4 address.",
+      "missing_password": "Enter a password.",
+      "duplicate_host": "This AP is already configured.",
+      "last_ap": "The last AP cannot be removed here.",
+      "invalid_mac": "A MAC address is invalid.",
+      "invalid_input": "Check the entered values."
+    }
+  },
+  "entity": {
+    "binary_sensor": {
+      "connected": {
+        "name": "Connected"
+      },
+      "collector_busy": {
+        "name": "AP access in use"
+      }
+    },
+    "text": {
+      "hostname": {
+        "name": "HostName"
+      }
+    },
+    "sensor": {
+      "reported_hostname": {
+        "name": "AP-reported hostname"
+      },
+      "ap_name": {
+        "name": "Access point"
+      },
+      "ssid": {
+        "name": "SSID"
+      },
+      "ip": {
+        "name": "IP address"
+      },
+      "channel": {
+        "name": "Channel"
+      },
+      "band": {
+        "name": "Band"
+      },
+      "mode": {
+        "name": "PHY mode"
+      },
+      "rssi": {
+        "name": "RSSI"
+      },
+      "tx_rate": {
+        "name": "Transmit rate"
+      },
+      "rx_rate": {
+        "name": "Receive rate"
+      },
+      "tx_bytes": {
+        "name": "Transmitted bytes"
+      },
+      "rx_bytes": {
+        "name": "Received bytes"
+      },
+      "association_time": {
+        "name": "Association time"
+      },
+      "security": {
+        "name": "Security"
+      },
+      "pmf": {
+        "name": "PMF"
+      },
+      "state": {
+        "name": "Connection flags"
+      },
+      "status": {
+        "name": "Authentication status"
+      },
+      "observed_at": {
+        "name": "Last observation"
+      },
+      "ap_uptime": {
+        "name": "Uptime"
+      },
+      "ap_clients_24ghz": {
+        "name": "2.4 GHz clients"
+      },
+      "ap_clients_5ghz": {
+        "name": "5 GHz clients"
+      },
+      "ap_status": {
+        "name": "Collection status"
+      },
+      "ap_channel_24ghz": {
+        "name": "2.4 GHz channel"
+      },
+      "ap_channel_5ghz": {
+        "name": "5 GHz channel"
+      }
+    }
+  },
+  "services": {
+    "set_hostname": {
+      "name": "Set host name",
+      "description": "Assign a persistent name by MAC. Empty clears the override.",
+      "fields": {
+        "mac": {
+          "name": "MAC"
+        },
+        "hostname": {
+          "name": "HostName"
+        }
+      }
+    }
+  }
+}

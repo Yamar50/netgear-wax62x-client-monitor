@@ -1,0 +1,8 @@
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+.venv*/
+dist/
+*.egg-info/
+.DS_Store
+local-config.json

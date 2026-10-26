@@ -1,0 +1,193 @@
+{
+  "title": "NETGEAR WAX62x Client Monitor",
+  "config": {
+    "step": {
+      "user": {
+        "title": "アクセスポイントを追加",
+        "data": {
+          "name": "AP名",
+          "host": "APのホスト名またはIPv4アドレス",
+          "username": "ユーザー名",
+          "password": "パスワード（編集時は空欄で維持）",
+          "verify_ssl": "HTTPS証明書を検証する"
+        },
+        "description": "初期状態では取得は停止しています。全APを登録し、既存の収集処理を停止またはHAの使用予約で保護してから、設定で取得を有効にしてください。この画面ではAPへログインしません。"
+      }
+    },
+    "error": {
+      "invalid_host": "ホスト名またはIPv4アドレスのみを入力してください。",
+      "missing_password": "パスワードを入力してください。",
+      "duplicate_host": "このAPは登録済みです。",
+      "last_ap": "最後のAPを削除する場合は統合を削除してください。",
+      "invalid_mac": "MACアドレスの形式を確認してください。",
+      "invalid_input": "入力値を確認してください。"
+    },
+    "abort": {
+      "already_configured": "登録済みです。設定からAPを追加してください。"
+    }
+  },
+  "options": {
+    "step": {
+      "add_ap": {
+        "title": "APを追加",
+        "data": {
+          "name": "AP名",
+          "host": "APのホスト名またはIPv4アドレス",
+          "username": "ユーザー名",
+          "password": "パスワード（編集時は空欄で維持）",
+          "verify_ssl": "HTTPS証明書を検証する"
+        }
+      },
+      "edit_ap": {
+        "title": "APを編集",
+        "data": {
+          "name": "AP名",
+          "host": "APのホスト名またはIPv4アドレス",
+          "username": "ユーザー名",
+          "password": "パスワード（編集時は空欄で維持）",
+          "verify_ssl": "HTTPS証明書を検証する",
+          "remove": "このAPを削除"
+        }
+      },
+      "choose_ap": {
+        "title": "編集するAP",
+        "data": {
+          "ap_id": "アクセスポイント"
+        }
+      },
+      "collection": {
+        "title": "取得設定",
+        "data": {
+          "polling_enabled": "定期取得を有効化（ほかの収集処理を停止してから）",
+          "scan_interval": "取得間隔（秒）"
+        }
+      },
+      "clients": {
+        "title": "クライアントを登録",
+        "data": {
+          "selected_clients": "登録するクライアント",
+          "manual_macs": "MACアドレスを直接追加（1行に1台）"
+        }
+      },
+      "init": {
+        "menu_options": {
+          "collection": "取得設定",
+          "add_ap": "APを追加",
+          "choose_ap": "編集するAP",
+          "clients": "クライアントを登録"
+        }
+      }
+    },
+    "error": {
+      "invalid_host": "ホスト名またはIPv4アドレスのみを入力してください。",
+      "missing_password": "パスワードを入力してください。",
+      "duplicate_host": "このAPは登録済みです。",
+      "last_ap": "最後のAPを削除する場合は統合を削除してください。",
+      "invalid_mac": "MACアドレスの形式を確認してください。",
+      "invalid_input": "入力値を確認してください。"
+    }
+  },
+  "entity": {
+    "binary_sensor": {
+      "connected": {
+        "name": "接続状態"
+      },
+      "collector_busy": {
+        "name": "AP使用中"
+      }
+    },
+    "text": {
+      "hostname": {
+        "name": "HostName"
+      }
+    },
+    "sensor": {
+      "reported_hostname": {
+        "name": "APから取得したホスト名"
+      },
+      "ap_name": {
+        "name": "接続AP"
+      },
+      "ssid": {
+        "name": "SSID"
+      },
+      "ip": {
+        "name": "IPアドレス"
+      },
+      "channel": {
+        "name": "チャンネル"
+      },
+      "band": {
+        "name": "周波数帯"
+      },
+      "mode": {
+        "name": "接続方式"
+      },
+      "rssi": {
+        "name": "RSSI"
+      },
+      "tx_rate": {
+        "name": "送信速度"
+      },
+      "rx_rate": {
+        "name": "受信速度"
+      },
+      "tx_bytes": {
+        "name": "送信量"
+      },
+      "rx_bytes": {
+        "name": "受信量"
+      },
+      "association_time": {
+        "name": "接続継続時間"
+      },
+      "security": {
+        "name": "暗号化方式"
+      },
+      "pmf": {
+        "name": "PMF"
+      },
+      "state": {
+        "name": "接続フラグ"
+      },
+      "status": {
+        "name": "認証状態"
+      },
+      "observed_at": {
+        "name": "最終観測"
+      },
+      "ap_uptime": {
+        "name": "稼働時間"
+      },
+      "ap_clients_24ghz": {
+        "name": "2.4GHz接続台数"
+      },
+      "ap_clients_5ghz": {
+        "name": "5GHz接続台数"
+      },
+      "ap_status": {
+        "name": "取得状態"
+      },
+      "ap_channel_24ghz": {
+        "name": "2.4GHzチャンネル"
+      },
+      "ap_channel_5ghz": {
+        "name": "5GHzチャンネル"
+      }
+    }
+  },
+  "services": {
+    "set_hostname": {
+      "name": "HostNameを設定",
+      "description": "MACアドレスに任意の名前を設定します。空欄で解除します。",
+      "fields": {
+        "mac": {
+          "name": "MAC"
+        },
+        "hostname": {
+          "name": "HostName"
+        }
+      }
+    }
+  }
+}
