@@ -78,7 +78,11 @@ def normalize_client(row: dict, ap: dict, band: str, timestamp: float) -> dict:
         "idle_time": clean(row.get("idle")),
         "observed_at": iso_time(timestamp),
         "observed_timestamp": timestamp,
-        "connected": row.get("status") == "Authenticated",
+        "connected": True
+        if row.get("status") == "Authenticated"
+        else False
+        if row.get("status") in ("Disconnect", "Authentication Failed")
+        else None,
     }
 
 
@@ -92,8 +96,8 @@ def reconcile(previous: dict, results: list[dict], selected: list[str], now: flo
         for row in result.get("clients", []):
             key = row["mac"]
             old = observations.get(key)
-            if old is None or (row["connected"], row["observed_timestamp"]) > (
-                old["connected"],
+            if old is None or (row["connected"] is True, row["observed_timestamp"]) > (
+                old["connected"] is True,
                 old["observed_timestamp"],
             ):
                 observations[key] = dict(row)
@@ -104,6 +108,8 @@ def reconcile(previous: dict, results: list[dict], selected: list[str], now: flo
         row = dict(current or historical)
         if current and current["connected"]:
             row["connected"] = True
+        elif current and current["connected"] is None:
+            row["connected"] = None
         else:
             row["connected"] = False if complete else None
         row["connection_checked_at"] = iso_time(now) if row["connected"] is not None else None

@@ -7,7 +7,7 @@ from yarl import URL
 from custom_components.netgear_wax.api import WaxClient, WaxError
 
 
-@pytest.mark.parametrize("mode", ["normal", "bad_count", "wrong_detail_mac"])
+@pytest.mark.parametrize("mode", ["normal", "bad_count", "wrong_detail_mac", "missing_status"])
 async def test_full_wire_protocol_and_cleanup(mode):
     calls = []
     authenticated = False
@@ -56,14 +56,15 @@ async def test_full_wire_protocol_and_cleanup(mode):
         if "optCliList" in monitor:
             node = monitor["optCliList"]["wlan0"]
             if "3146087" in node:
-                data = {"3146087": [{"mac": "02:00:00:00:00:01", "status": "Authenticated", "ssid": "Example"}]}
+                data = {"3146087": [{"mac": "02:ab:cd:00:00:01", "status": "Authenticated", "ssid": "Example"}]}
             else:
                 key = next(iter(node["0x1FFFFFFFFFF"]))
+                assert key == "02-AB-CD-00-00-01", "AP detail selector requires uppercase"
                 data = {
                     "0x1FFFFFFFFFF": {
                         key: [
                             {
-                                "mac": "02:00:00:00:00:02" if mode == "wrong_detail_mac" else "02:00:00:00:00:01",
+                                "mac": "02:00:00:00:00:02" if mode == "wrong_detail_mac" else "02:ab:cd:00:00:01",
                                 "status": "Authenticated",
                                 "txB": 0,
                                 "rxB": 1500,
@@ -73,6 +74,11 @@ async def test_full_wire_protocol_and_cleanup(mode):
                         ]
                     }
                 }
+            if mode == "missing_status":
+                if "3146087" in data:
+                    data["3146087"][0].pop("status")
+                else:
+                    data["0x1FFFFFFFFFF"][key][0].pop("status")
             return web.json_response({"status": 0, "system": {"monitor": {"optCliList": {"wlan0": data}}}})
         return web.json_response({"status": 0})
 
@@ -88,13 +94,14 @@ async def test_full_wire_protocol_and_cleanup(mode):
             {"id": "ap", "name": "Test", "host": "ap.example.test", "username": "test", "password": "test-only"}
         )
         client.base = URL(f"http://127.0.0.1:{port}")
-        if mode == "bad_count":
-            with pytest.raises(WaxError, match="invalid_station_count"):
+        if mode in ("bad_count", "missing_status"):
+            error = "invalid_station_count" if mode == "bad_count" else "unknown_client_status"
+            with pytest.raises(WaxError, match=error):
                 await client.collect()
         else:
             result = await client.collect()
             row = result["clients"][0]
-            assert row["mac"] == "02:00:00:00:00:01"
+            assert row["mac"] == "02:ab:cd:00:00:01"
             assert row["connected"]
             assert row["detail_available"] is (mode == "normal")
             if mode == "normal":

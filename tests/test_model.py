@@ -64,3 +64,9 @@ def test_zero_and_missing_measurements_not_conflated():
     assert value["pmf"] is None
     assert value["channel"] is None
     assert "password" not in value
+    assert value["connected"] is None
+
+
+def test_incomplete_client_status_does_not_become_disconnected():
+    unknown = normalize_client({"mac": MAC}, {"id": "a", "name": "AP"}, "5GHz", 100)
+    assert reconcile({}, [result("a", [unknown])], [], 100)[MAC]["connected"] is None

@@ -174,7 +174,8 @@ class WaxClient:
         for wlan, band in (("wlan0", "2.4GHz"), ("wlan1", "5GHz")):
             for basic in await self.client_list(wlan, counts[wlan]):
                 mac = mac_address(basic["mac"])
-                key = mac.replace(":", "-")
+                # WAX detail selectors are case-sensitive, unlike stored MAC identity.
+                key = mac.upper().replace(":", "-")
                 detail = basic
                 detail_ok = False
                 try:
@@ -192,6 +193,8 @@ class WaxClient:
                 except WaxError:
                     pass
                 row = normalize_client(detail, ap, band, now)
+                if row["connected"] is None:
+                    raise WaxError("unknown_client_status")
                 row["detail_available"] = detail_ok
                 rows.append(row)
         return {
