@@ -114,4 +114,7 @@ class RFStatus(CoordinatorEntity, SensorEntity):
     @property
     def extra_state_attributes(self):
         state = self.coordinator.radio.export()
-        return {k: state.get(k) for k in ("mode", "running", "checked_at", "interval_seconds", "scan_seconds", "error")}
+        return {**{k: state.get(k) for k in ("mode", "running", "checked_at", "interval_seconds", "scan_seconds", "error")},
+                "recovery_enabled": state.get("config", {}).get("recovery_enabled", False),
+                "missing_minutes": state.get("config", {}).get("missing_minutes", 30),
+                "last_recovery": state.get("last_recovery", {})}

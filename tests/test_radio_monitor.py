@@ -12,7 +12,8 @@ from custom_components.netgear_wax.radio_monitor import RadioMonitor, validate_c
 from custom_components.netgear_wax.wifi_probe import fingerprint
 
 APS = [{"id": str(i), "name": f"Test{i}"} for i in range(4)]
-CONFIG = {"interface": "wlan0", "ssid": "Synthetic", "targets": {str(i): f"02:00:00:00:00:0{i}" for i in range(4)}}
+CONFIG = {"interface": "wlan0", "ssid": "Synthetic", "targets": {str(i): f"02:00:00:00:00:0{i}" for i in range(4)},
+          "recovery_enabled": False, "missing_minutes": 30}
 
 
 def scan(missing=()):
@@ -142,3 +143,43 @@ async def test_interval_callback_dispatch_runs_on_ha_loop(monitor):
     assert monitor.task is not None
     await monitor.task
     assert monitor.state["status"] == "all_visible"
+
+
+async def test_continuous_missing_duration_resets_on_reception_or_all_missing(monitor, monkeypatch):
+    scanner = Mock(return_value=scan(("3",)))
+    monkeypatch.setattr("custom_components.netgear_wax.radio_monitor.scan_wifi", scanner)
+    await monitor.check()
+    since = monitor.state["missing"]["3"]
+    await monitor.check()
+    assert monitor.state["missing"]["3"] == since
+    monitor.state["config"]["recovery_enabled"] = True
+    assert not monitor.recovery_due("3", time.time(), 1)
+    monitor.state["missing"]["3"] -= 1801
+    assert monitor.recovery_due("3", time.time(), 1)
+    scanner.return_value = scan(("0", "1", "2", "3"))
+    await monitor.check()
+    assert monitor.state["missing"] == {}
+    assert not monitor.recovery_due("3", time.time(), 1)
+
+
+async def test_candidate_needs_fresh_scan_and_respects_cooldown_and_one_per_cycle(monitor, monkeypatch):
+    monkeypatch.setattr("custom_components.netgear_wax.radio_monitor.scan_wifi", lambda _: scan(("3",)))
+    await monitor.check()
+    monitor.state["config"]["recovery_enabled"] = True
+    monitor.state["missing"]["3"] -= 1801
+    assert monitor.recovery_due("3", time.time(), 1)
+    monitor.state["cooldowns"]["3"] = time.time() + 60
+    assert not monitor.recovery_due("3", time.time(), 1)
+    monitor.state["cooldowns"].clear()
+    monitor.recovery_cycle = 1
+    assert not monitor.recovery_due("3", time.time(), 1)
+    assert monitor.recovery_due("3", time.time(), 2)
+    monitor.state["checked_timestamp"] -= 1201
+    assert not monitor.recovery_due("3", time.time(), 2)
+
+
+async def test_failed_scan_resets_long_missing_streak(monitor, monkeypatch):
+    monitor.state["missing"] = {"3": time.time() - 3600}
+    monkeypatch.setattr("custom_components.netgear_wax.radio_monitor.scan_wifi", Mock(side_effect=TimeoutError))
+    await monitor.run()
+    assert monitor.state["missing"] == {}

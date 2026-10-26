@@ -207,6 +207,7 @@ class WaxCoordinator(DataUpdateCoordinator):
         safe_release = True
         try:
             results = []
+            cycle = time.time()
             for config in self.settings["aps"]:
                 ap_id = config["id"]
                 result = {"id": ap_id, "name": config["name"], "status": "unavailable"}
@@ -219,7 +220,16 @@ class WaxCoordinator(DataUpdateCoordinator):
                 try:
                     # Serial AP sessions; timeout still runs the client's logout finally.
                     async with asyncio.timeout(MAX_POLL_SECONDS):
-                        result = await client.collect()
+                        radio = getattr(self, "radio", None)
+                        if radio is None:
+                            result = await client.collect()
+                        else:
+                            # Standby acknowledgement must wait through Radio
+                            # ON restoration AND logout, not just the scan.
+                            async with radio.lock:
+                                async def maintenance(owned_client, collected):
+                                    await radio.after_collection(owned_client, collected, cycle)
+                                result = await client.collect(after_collect=maintenance)
                         result["collection_started_timestamp"] = collection_started
                 except (AuthenticationError, LoginLimitError, LogoutError) as err:
                     result["error"] = str(err)

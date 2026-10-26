@@ -80,12 +80,14 @@
       },
       "radio_monitor": {
         "title": "5GHz電波監視",
-        "description": "10分ごとに周囲の電波を確認します。「AP名 = 5GHzのBSSID」を1行に1台入力してください。既存のAPデバイスに受信状態だけを追加し、詳細にSSIDと実測チャンネルを表示します。APの設定変更・自動復旧は行いません。",
+        "description": "10分ごとに周囲の電波を確認します。「AP名 = 5GHzのBSSID」を1行に1台入力してください。自動復旧を有効にすると、連続未受信時間を過ぎたAPについて、通常のクライアント取得に成功し5GHz接続が0台の場合だけ同じセッションで復旧します。取得失敗は次回へ見送ります。設定変更は先に待機へ切り替えてください。",
         "data": {
           "interface": "無線インターフェース",
           "ssid": "対象SSID",
           "targets": "APとBSSIDの対応",
-          "mode": "動作モード"
+          "mode": "動作モード",
+          "recovery_enabled": "クライアント取得時に5GHz Radioを自動復旧する",
+          "missing_minutes": "電波の連続未受信時間（分）"
         }
       }
     },
@@ -196,7 +198,7 @@
         "name": "5GHz監視状態",
         "state": {
           "standby": "待機",
-          "observe": "監視のみ",
+          "observe": "監視",
           "starting": "開始待ち",
           "configuration_required": "設定が必要",
           "waiting_for_access": "AP使用予約待ち",
@@ -225,7 +227,7 @@
     "rf_mode": {
       "options": {
         "standby": "待機",
-        "observe": "監視のみ"
+        "observe": "監視"
       }
     }
   }

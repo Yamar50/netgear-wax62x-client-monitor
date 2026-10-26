@@ -202,3 +202,23 @@ async def test_list_login_limit_is_not_retried():
         await client.collect()
     assert client.attempt == 0
     assert client.logout_ok
+
+
+async def test_maintenance_hook_runs_after_complete_collection_before_logout():
+    client = Simulated()
+    async def maintenance(owned, result):
+        assert owned is client and result["status"] == "ok"
+        assert owned.owned and not owned.logout_ok
+        assert sum(login for _, login in owned.calls) == 1
+        owned.calls.append(("maintenance", False))
+    await client.collect(after_collect=maintenance)
+    assert client.calls[-2:] == [("maintenance", False), ("/logout", False)]
+
+
+async def test_failed_collection_never_runs_radio_hook():
+    client = Simulated("read")
+    async def forbidden(*_):
+        pytest.fail("failed collection must not start recovery")
+    with pytest.raises(WaxError):
+        await client.collect(after_collect=forbidden)
+    assert client.logout_ok

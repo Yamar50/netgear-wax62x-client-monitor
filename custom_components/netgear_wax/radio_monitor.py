@@ -1,4 +1,4 @@
-"""Persistent passive RF monitoring without AP management requests."""
+"""RF monitoring with optional recovery inside ordinary collection sessions."""
 
 import asyncio
 from copy import deepcopy
@@ -20,6 +20,7 @@ from .const import DOMAIN
 from .lease import BusyError
 from .model import mac_address, iso_time
 from .radio_scan import scan_wifi
+from .radio_recovery import SessionRadio, uptime_seconds
 from .wifi_probe import fingerprint
 
 _LOGGER = logging.getLogger(__name__)
@@ -38,7 +39,11 @@ def validate_config(config, aps):
     targets = {key: mac_address(value) for key, value in targets.items()}
     if len(set(targets.values())) != len(targets):
         raise ValueError("duplicate_bssid")
-    return {"interface": interface, "ssid": ssid, "targets": targets}
+    enabled, minutes = config.get("recovery_enabled", False), config.get("missing_minutes", 30)
+    if type(enabled) is not bool or type(minutes) is not int or not 10 <= minutes <= 1440:
+        raise ValueError("invalid_recovery_configuration")
+    return {"interface": interface, "ssid": ssid, "targets": targets,
+            "recovery_enabled": enabled, "missing_minutes": minutes}
 
 
 def visibility(config, scan):
@@ -63,6 +68,7 @@ class RadioMonitor:
         self.last_attempt = 0
         self.task = None
         self.unsubscribe = None
+        self.recovery_cycle = None
 
     async def save(self):
         saved = deepcopy(self.state)
@@ -81,7 +87,7 @@ class RadioMonitor:
         )
         if self.state["config"]:
             try:
-                validate_config(self.state["config"], self.coordinator.settings["aps"])
+                self.state["config"] = validate_config(self.state["config"], self.coordinator.settings["aps"])
             except ValueError:
                 self.state.update(mode="standby", status="configuration_required")
         await self.save()
@@ -184,6 +190,79 @@ class RadioMonitor:
                     self.coordinator.async_update_listeners()
         return self.export()
 
+    async def queue_preflight(self):
+        """Queue read-only settings validation for the next ordinary poll."""
+        async with self.lock:
+            self.state["preflight_pending"] = [ap["id"] for ap in self.coordinator.settings["aps"]]
+            self.state["preflight"] = {}
+            await self.save()
+        return self.export()
+
+    def recovery_due(self, ap_id, now, cycle):
+        config = self.state["config"]
+        if self.state["mode"] != "observe" or not config.get("recovery_enabled", False):
+            return False
+        observed = self.state.get("observations", {})
+        since = self.state["missing"].get(ap_id)
+        return (
+            since is not None
+            and 0 <= now - self.state.get("checked_timestamp", 0) <= 2 * INTERVAL
+            and now - since >= config.get("missing_minutes", 30) * 60
+            and observed.get(ap_id, {}).get("visible") is False
+            and any(row.get("visible") is True for row in observed.values())
+            and self.state["cooldowns"].get(ap_id, 0) <= now
+            and self.recovery_cycle != cycle
+        )
+
+    async def after_collection(self, client, result, cycle):
+        """Called under our mode lock and collector's lease before logout."""
+        if result.get("status") != "ok":
+            return
+        ap_id = client.config["id"]
+        if self.state["mode"] == "standby":
+            return
+        session = SessionRadio(client)
+        if ap_id in self.state.get("preflight_pending", []):
+            try:
+                await session.details()
+                outcome = "settings_validated"
+            except WaxError as err:
+                outcome = str(err)
+            self.state.setdefault("preflight", {})[ap_id] = {"status": outcome, "checked_at": iso_time(time.time())}
+            self.state["preflight_pending"].remove(ap_id)
+            await self.save()
+        if not self.recovery_due(ap_id, time.time(), cycle):
+            return
+        # Both a complete captured list and the AP's own counter must say zero.
+        # Missing/failed reads never imply zero. No additional request in this case.
+        if type(result.get("clients_5ghz")) is not int or type(result.get("reported_clients_5ghz")) is not int:
+            return
+        if result["clients_5ghz"] != 0 or result["reported_clients_5ghz"] != 0:
+            return
+        if not isinstance(result.get("clients"), list) or any(row.get("band") == "5GHz" for row in result["clients"]):
+            return
+
+        async def before_write():
+            if not self.recovery_due(ap_id, time.time(), cycle):
+                raise WaxError("recovery_conditions_changed")
+            # Persist BEFORE touching Radio; failed/ambiguous writes keep the hold.
+            self.state["cooldowns"][ap_id] = time.time() + 3600
+            self.state.setdefault("last_recovery", {})[ap_id] = {"status": "started", "at": iso_time(time.time())}
+            await self.save()
+            self.recovery_cycle = cycle
+
+        try:
+            if uptime_seconds(result.get("uptime")) < 900:
+                return
+            outcome = await session.recover(before_write)
+        except (WaxError, OSError, ValueError, TimeoutError) as err:
+            outcome = str(err) if isinstance(err, WaxError) else type(err).__name__
+            _LOGGER.warning("5 GHz recovery deferred for %s: %s", client.config["name"], outcome)
+        self.state.setdefault("last_recovery", {})[ap_id] = {"status": outcome, "at": iso_time(time.time())}
+        await self.save()
+        result["radio_recovery"] = outcome
+        self.coordinator.async_update_listeners()
+
     async def check(self):
         config = validate_config(self.state["config"], self.coordinator.settings["aps"])
         async with self.hass.data[f"{DOMAIN}_scan_lock"]:
@@ -195,6 +274,12 @@ class RadioMonitor:
                 raise
         visible = visibility(config, scan)
         now = time.time()
+        # Missing is a continuous series of successful, fresh partial scans.
+        # All targets absent may be a receiver problem, never restart all APs.
+        self.state["missing"] = {
+            key: self.state["missing"].get(key, now)
+            for key, row in visible.items() if row is None
+        } if any(visible.values()) else {}
         self.state.update(
             checked_timestamp=now,
             checked_at=iso_time(now),

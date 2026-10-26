@@ -1,4 +1,4 @@
-"""Read-only WAX625/WAX628 management API client with an isolated session."""
+"""WAX625/WAX628 collection with an isolated, optionally maintained session."""
 
 from __future__ import annotations
 
@@ -230,7 +230,7 @@ class WaxClient:
             "status": "ok",
         }
 
-    async def collect(self):
+    async def collect(self, after_collect=None):
         jar = aiohttp.CookieJar(unsafe=True)
         async with aiohttp.ClientSession(cookie_jar=jar, timeout=aiohttp.ClientTimeout(total=20)) as session:
             self.session = session
@@ -255,7 +255,12 @@ class WaxClient:
                 if not self.token:
                     raise AuthenticationError("missing_session_token")
                 jar.update_cookies({"ssid": base64.b64encode(self.token.encode()).decode()}, response_url=self.base)
-                return await self.read_clients()
+                result = await self.read_clients()
+                # Maintenance can reuse this owned session only after a complete
+                # successful collection. Failed reads never reach the hook.
+                if after_collect is not None:
+                    await after_collect(self, result)
+                return result
             except (ValueError, KeyError, IndexError, TypeError, AttributeError) as err:
                 raise WaxError("invalid_response") from err
             finally:

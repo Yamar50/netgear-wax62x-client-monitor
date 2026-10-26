@@ -100,7 +100,9 @@ class WaxOptionsFlow(config_entries.OptionsFlow):
                     if name not in names or names[name] in targets:
                         raise ValueError("invalid_input")
                     targets[names[name]] = mac
-                config = {"interface": user_input["interface"], "ssid": user_input["ssid"], "targets": targets}
+                config = {"interface": user_input["interface"], "ssid": user_input["ssid"], "targets": targets,
+                          "recovery_enabled": user_input.get("recovery_enabled", False),
+                          "missing_minutes": user_input.get("missing_minutes", 30)}
                 if config != current:
                     await radio.configure(config)
                 await radio.set_mode(user_input["mode"])
@@ -115,6 +117,9 @@ class WaxOptionsFlow(config_entries.OptionsFlow):
                 vol.Required("interface", default=current.get("interface", "wlan0")): str,
                 vol.Required("ssid", default=current.get("ssid", "")): str,
                 vol.Required("targets", default=defaults): selector.TextSelector(selector.TextSelectorConfig(multiline=True)),
+                vol.Required("recovery_enabled", default=current.get("recovery_enabled", False)): bool,
+                vol.Required("missing_minutes", default=current.get("missing_minutes", 30)): vol.All(
+                    vol.Coerce(int), vol.Range(min=10, max=1440)),
                 vol.Required("mode", default=radio.state["mode"]): selector.SelectSelector(
                     selector.SelectSelectorConfig(options=["standby", "observe"], translation_key="rf_mode")),
             }), errors=errors,
