@@ -282,6 +282,8 @@ class RadioMonitor:
             self.state.setdefault("last_recovery", {})[ap_id] = {"status": "started", "at": iso_time(time.time())}
             await self.save()
             self.recovery_cycle = cycle
+            # Publish the persisted start before the first Radio write.
+            self.coordinator.async_update_listeners()
 
         try:
             if uptime_seconds(result.get("uptime")) < 900:
@@ -312,6 +314,8 @@ class RadioMonitor:
                 "status": "started", "target_channel": target, "at": iso_time(time.time())}
             self.state["missing"].pop(ap_id, None)
             await self.save()
+            # Publish before channel Apply; completion can take several minutes.
+            self.coordinator.async_update_listeners()
 
         try:
             current = channel_number(result.get("channel_5ghz"))

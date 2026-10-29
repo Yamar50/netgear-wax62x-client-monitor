@@ -71,6 +71,19 @@ async def test_active_clients_do_not_block_dfs_and_same_login_is_used(monitor):
     assert (await monitor.store.async_load())['dfs_indexes']['a'] == 1
 
 
+async def test_dfs_start_published_before_apply_and_completion(monitor):
+    enable(monitor)
+    client = DfsSession()
+    events = []
+    monitor.coordinator.async_update_listeners.side_effect = lambda: events.append(
+        (deepcopy(monitor.state.get('last_dfs', {})), list(client.calls)))
+    await collect(client, monitor)
+    assert [state['a']['status'] for state, _ in events] == ['started', 'channel_configured']
+    assert events[0][0]['a']['target_channel'] == 64
+    assert not any(call.startswith('channel-') for call in events[0][1])
+    assert 'channel-64' in events[1][1]
+
+
 @pytest.mark.parametrize('current', [52, 56, 60, 64])
 async def test_allowed_channel_skips_all_radio_requests(monitor, current):
     enable(monitor)

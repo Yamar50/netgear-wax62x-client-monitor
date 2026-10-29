@@ -104,6 +104,19 @@ async def test_complete_collection_recovery_and_logout_share_one_login(monitor):
     assert client.logout_ok
 
 
+@pytest.mark.parametrize('initial_radio', ['0', '1'])
+async def test_recovery_start_published_before_writes_and_completion(monitor, initial_radio):
+    client = Session()
+    client.table['wlan1']['radioStatus'] = initial_radio
+    events = []
+    monitor.coordinator.async_update_listeners.side_effect = lambda: events.append(
+        (deepcopy(monitor.state.get('last_recovery', {})), list(client.calls)))
+    await collect(client, monitor)
+    assert [state['a']['status'] for state, _ in events] == ['started', 'recovered']
+    assert 'off' not in events[0][1] and 'on' not in events[0][1]
+    assert 'on' in events[1][1]
+
+
 @pytest.mark.parametrize('changes', [
     {'status': 'unavailable'}, {'clients_5ghz': 1}, {'reported_clients_5ghz': 1},
     {'clients_5ghz': None}, {'clients_5ghz': False}, {'reported_clients_5ghz': None},
@@ -153,6 +166,7 @@ async def test_storage_failure_prevents_first_write(monitor):
         await collect(client, monitor)
     assert 'off' not in client.calls and 'on' not in client.calls
     assert client.logout_ok
+    monitor.coordinator.async_update_listeners.assert_not_called()
 
 
 async def test_ambiguous_off_still_attempts_on_and_keeps_cooldown(monitor):
